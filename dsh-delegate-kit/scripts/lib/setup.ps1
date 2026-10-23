@@ -1652,11 +1652,16 @@ function Invoke-KitRepair {
 
 function Invoke-KitStatus {
   $paths = Get-KitPaths
+  $offExists = Test-Path -LiteralPath $paths.Off -PathType Leaf
+  $offState = $null
+  if ($offExists) { try { $offState = Read-KitJson $paths.Off } catch { $offState = $null } }
+  $disabledAt = if ($offExists) { [string](Get-KitProp $offState 'disabledAt') } else { $null }
+  $delegationEnabled = -not $offExists
   $state = Read-KitState
   if ($null -eq $state) {
     return @{
       ExitCode = 2
-      Result = [ordered]@{ initialized = $false; reasons = @('未初始化：先运行 setup'); dshTested = $null }
+      Result = [ordered]@{ initialized = $false; reasons = @('未初始化：先运行 setup'); dshTested = $null; delegationEnabled = $delegationEnabled }
       Text = 'dsh-delegate-kit 尚未初始化：先运行 kit.ps1 setup'
     }
   }
@@ -1729,6 +1734,8 @@ function Invoke-KitStatus {
     logsDir           = $paths.Logs
     kitHome           = $paths.Home
     kitVersion        = [string](Get-KitProp $state 'kitVersion')
+    delegationEnabled = $delegationEnabled
+    disabledAt        = $disabledAt
   }
 
   $lines = New-Object 'System.Collections.Generic.List[string]'
@@ -1748,6 +1755,16 @@ function Invoke-KitStatus {
   if ($effortMode -eq 'fixed') { $modeText = 'fixed（' + $defaultEffort + '）' }
   $lines.Add('思考模式：' + $modeText)
   $lines.Add('默认权限：' + $mode)
+  if ($offExists) {
+    $offAtText = ConvertTo-KitLocalTimeText $disabledAt
+    if ($offAtText) {
+      $lines.Add("委派开关：已关闭（$offAtText 关闭），运行 on 重新开启")
+    } else {
+      $lines.Add('委派开关：已关闭，运行 on 重新开启')
+    }
+  } else {
+    $lines.Add('委派开关：开启')
+  }
   $lines.Add('可选功能：')
   $bMark = '✗'
   if ($browserAvail) { $bMark = '✓' }

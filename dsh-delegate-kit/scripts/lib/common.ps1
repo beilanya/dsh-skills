@@ -1,7 +1,7 @@
 ﻿# dsh-delegate-kit 共用函数（由 kit.ps1 dot-source；dsh-run.ps1 不依赖本文件）。
 # 兼容 Windows PowerShell 5.1。给人看的提示一律走 Write-KitInfo，不要用 Write-Output（会混进返回值）。
 
-$script:KitVersion = '0.3.0'
+$script:KitVersion = '0.4.0'
 $script:KitUtf8 = New-Object System.Text.UTF8Encoding($false)
 $script:KitJsonMode = $false
 $script:KitModes = @('read-only', 'workspace-write', 'danger-full-access')
@@ -91,6 +91,16 @@ function Get-KitProp($obj, [string]$name) {
   if ($null -eq $p) { return $null }
   return $p.Value
 }
+function ConvertTo-KitLocalTimeText([string]$iso) {
+  # ISO 时间转本地 yyyy-MM-dd HH:mm；空值或格式不对时返回空串
+  if (-not $iso) { return '' }
+  try {
+    $dto = [DateTimeOffset]::Parse($iso, [Globalization.CultureInfo]::InvariantCulture)
+    return $dto.LocalDateTime.ToString('yyyy-MM-dd HH:mm')
+  } catch {
+    return ''
+  }
+}
 
 # ---- 路径 ----
 function Get-DshHome {
@@ -107,6 +117,7 @@ function Get-KitPaths {
     LogsCodex = Join-Path $kitHome 'logs\codex'
     Backups   = Join-Path $kitHome 'backups'
     Diag      = Join-Path $kitHome 'diag'
+    Off       = Join-Path $kitHome 'off.json'
     DshHome   = Get-DshHome
     Headless  = Join-Path (Get-DshHome) 'profiles\headless'
     WebProfile     = Join-Path (Get-DshHome) 'profiles\web\cordis.patch.yml'

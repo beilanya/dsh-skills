@@ -1,6 +1,6 @@
 ---
 name: dsh-delegate-kit
-description: 把执行类工作委派给命令行版 dsh（dsh headless，模型由用户在 setup 时选定）：主 Agent 负责思考、写任务单、审核，dsh 负责写代码、检索定位、构建测试、排查取证、网页和桌面操作。用户说 /dsh-delegate-kit help|setup|status|check|repair|stats|diag|rules|uninstall、“交给 dsh 做”“派给 dsh”，或全局规则要求委派时使用。dsh 不可用时回退到内置子 Agent。
+description: 把执行类工作委派给命令行版 dsh（dsh headless，模型由用户在 setup 时选定）：主 Agent 负责思考、写任务单、审核，dsh 负责写代码、检索定位、构建测试、排查取证、网页和桌面操作。用户说 /dsh-delegate-kit help|setup|status|check|repair|stats|diag|rules|uninstall|on|off、“交给 dsh 做”“派给 dsh”，或全局规则要求委派时使用。dsh 不可用时回退到内置子 Agent。
 ---
 
 # dsh-delegate-kit：主 Agent 规划审核，dsh 执行
@@ -31,11 +31,13 @@ description: 把执行类工作委派给命令行版 dsh（dsh headless，模型
 4. 输出里 `plugins.needInstall` 为 true 时：把 `plugins.command` 原样展示给用户，说明这会改 headless profile 的插件（不影响 DSH 桌面端），征得同意后运行 `kit.ps1 repair -InstallPlugins -Json`。用户不同意也没关系，浏览器和电脑操作会标为不可用，其余照常。
 5. 看输出里的 check 结果：通过就告诉用户已可用，并列出模型、思考模式、权限、可选功能状态；不通过就转述原因并建议 `repair`。
 6. 冒烟测试会消耗 token，先问用户要不要跑。同意后按第 2 节派发一个极小任务（例如在 scratchpad 里新建一个空目录，任务单写“只回答 OK，不要调用任何工具”，加 `-NoProtocol -TimeoutMin 5`）。
-7. 全局规则：运行 `kit.ps1 rules -Host claude -Show`，把要追加到 `~/.claude/CLAUDE.md` 的完整段落原样展示给用户，说明“写入前会备份原文件，段落用开始/结束标记包起来，uninstall 能原样移除”。用户明确同意后才运行 `kit.ps1 rules -Host claude -Apply`，并报告备份文件路径。用户不同意就跳过，Skill 仍可在用户点名时使用。
+7. 全局规则：运行 `kit.ps1 rules -Host claude -Show` 之前，先看 `~/.claude/CLAUDE.md` 里是否已有用户自己写的委派规则（派给子 Agent、haiku 等）；有的话告诉用户“这些规则会保留；开启期间以 kit 段落为准，off 后自动恢复”。把要追加的完整段落原样展示给用户，说明“写入前会备份原文件，段落用开始/结束标记包起来，uninstall 能原样移除”。用户明确同意后才运行 `kit.ps1 rules -Host claude -Apply`，并报告备份文件路径。`rules -Apply` 提示委派已关闭时，告诉用户先运行 `on`。用户不同意就跳过，Skill 仍可在用户点名时使用。
 
 ### 其他子命令
 
 - `rules`：只做 setup 的第 7 步（展示并在用户同意后追加全局规则），不重新选模型。用于已在 Codex 里 setup 过、现在要让 Claude Code 也自动委派的情况。
+- `off`：用户说 off、“关掉 dsh 委派”“先别派给 dsh” 就视为同意，运行 `kit.ps1 off`，转述结果（哪些规则段落被移除、备份路径）。告诉用户：从现在起本会话不再派发给 dsh，任务按他自己的其他规则或由主 Agent 完成；新会话完全按关闭后的规则工作；重新开启用 `on`。
+- `on`：运行 `kit.ps1 on`，转述结果；提醒新会话才会加载写回的规则，本会话从现在起可以按本 Skill 恢复委派。
 - `check`：自检（dsh 版本对比基线、补丁能否解析、必需插件是否都在、模型是否仍支持所选思考档、可选功能状态）。不调模型，不花 token。
 - `repair`：按当前 dsh 版本重新识别插件 id、按当前模型目录重新生成补丁，再跑 check。需要对齐插件版本时，先把输出里的安装命令给用户看，同意后再加 `-InstallPlugins` 重跑。
 - `stats [-Days 30]`：按 index 统计效率（按思考档、是否挂浏览器分组）。用户问效率、或要调默认思考档时用它，不要凭印象。
@@ -81,6 +83,8 @@ description: 把执行类工作委派给命令行版 dsh（dsh headless，模型
 
 ## 2. 派发
 
+本会话里执行过 `off`（或 `status` 显示已关闭）时不派发。
+
 用 PowerShell 工具的 `run_in_background: true` 启动，结束时 harness 自动发完成通知，不要轮询或 sleep：
 
     powershell -NoProfile -ExecutionPolicy Bypass -File "$KIT\dsh-run.ps1" -TaskFile "<任务单路径>" -Cwd "<工作目录>" -Label "<简短任务名>"
@@ -120,7 +124,7 @@ description: 把执行类工作委派给命令行版 dsh（dsh headless，模型
 
     > ✅ **dsh 任务「<Label>」完成** · `STATUS: OK` · <耗时> · sessionId `<id>`
 
-状态不是 OK 时换图标：⚠️（FAILED / TIMEOUT）、⛔（DSH_UNAVAILABLE / DSH_INCOMPATIBLE，并说明已回退）。
+状态不是 OK 时换图标：⚠️（FAILED / TIMEOUT）、⛔（DSH_UNAVAILABLE / DSH_INCOMPATIBLE，并说明已回退）、⏸（DSH_DISABLED）。
 
 完成通知里的 output 文件首行是 `STATUS:`，后面是 sessionId、模型/思考档/权限、耗时、步数、工具调用、token（新输入/输出与缓存读取分开列）、git 变化、日志路径和最终回复。向用户说成本时区分缓存读取（单价很低）和新输入/输出。
 
@@ -134,6 +138,7 @@ description: 把执行类工作委派给命令行版 dsh（dsh headless，模型
 ## 3. 按 STATUS 处理
 
 - `OK`：进入审核。
+- `DSH_DISABLED`：用户已关闭委派。本任务不派 dsh、不重试、不走 DSH_UNAVAILABLE 的回退流程；按用户规则文件里的其他规则（例如派给子 Agent）或亲自完成，并告诉用户一次“dsh 委派已关闭，需要时运行 `/dsh-delegate-kit on`”。
 - `DSH_UNAVAILABLE`（未初始化、dsh 不存在、凭证缺失、鉴权或额度失效）或 `DSH_INCOMPATIBLE`（dsh 升级后补丁不兼容、所需可选功能不可用）：本任务回退到内置子 Agent（Agent 工具，可以指定便宜的模型，例如 `model: "haiku"`），任务单原样复用，多轮修正用 SendMessage 续接同一个子 Agent。向用户报告一次原因：`DSH_INCOMPATIBLE` 时转述摘要里的原因并建议运行 `/dsh-delegate-kit repair`；原因是 `FEATURE: browser` 或 `FEATURE: computerUse` 时，也可以去掉该参数重派（如果任务不依赖它）。
   - 摘要带 `FORMAT: output` 时不同：dsh 已经跑完，只是 kit 认不出新版的输出格式，任务可能已经做完。先看摘要里的 git 变化和最终回复、核对工作区，只把没做完的部分交给子 Agent，不要整单重做。告诉用户这需要新版 kit：建议运行 `/dsh-delegate-kit update`；没有新版时，可以按摘要里的命令把 dsh 回退到已验证版本。repair 修不了这种情况。
 - 摘要里出现“未经本 kit 验证”的警告时，照常审核，并在本轮回复里告诉用户一次：当前 dsh 版本没测过；出问题时运行 `/dsh-delegate-kit update`，或按警告里的命令回退 dsh。

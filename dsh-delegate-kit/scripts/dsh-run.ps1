@@ -7,12 +7,13 @@ dsh-run.ps1 — 把任务交给 dsh headless 执行，输出精简摘要（dsh-d
 用法：
   powershell -NoProfile -ExecutionPolicy Bypass -File "<本文件>" -TaskFile <任务单.md> -Cwd <项目目录> [-SessionId <session-...>] [-Effort <档>] [-Mode read-only|workspace-write|danger-full-access] [-EscalationApproved] [-Browser] [-ComputerUse] [-TimeoutMin 90] [-NoProtocol] [-LogPrefix <绝对前缀>] [-HostName claude|codex]
 
-首行固定输出 "STATUS: <OK|FAILED|DSH_UNAVAILABLE|TIMEOUT|DSH_INCOMPATIBLE>"：
+首行固定输出 "STATUS: <OK|FAILED|DSH_UNAVAILABLE|TIMEOUT|DSH_INCOMPATIBLE|DSH_DISABLED>"：
   OK                 dsh 正常完成且收到 final
   FAILED             参数错误（exit 2）或其他失败（exit 1）
   DSH_UNAVAILABLE    dsh / node / state.json 不可用
   TIMEOUT            超时，已尝试终止本次拥有的进程树
   DSH_INCOMPATIBLE   state 与当前环境不兼容，预检未通过；或 dsh 输出格式无法识别（带 FORMAT: output）
+  DSH_DISABLED       dsh 委派已被 off 关闭（exit 6）
 
 运行产物默认在 LogDir（KIT_HOME\logs）下：
   <prefix>.task.md / .jsonl / .err.log / .progress.md / .running / .extend
@@ -391,6 +392,22 @@ if ([string]::IsNullOrWhiteSpace($kitHome)) {
 }
 try { $kitHome = [IO.Path]::GetFullPath($kitHome) } catch {
   Exit-With 'DSH_UNAVAILABLE' "KIT_HOME 路径无效: $kitHome" 3
+}
+$offPath = Join-Path $kitHome 'off.json'
+if (Test-Path -LiteralPath $offPath -PathType Leaf) {
+  $offAtText = ''
+  try {
+    $offState = [IO.File]::ReadAllText($offPath, $utf8) | ConvertFrom-Json
+    $offRaw = [string]$offState.disabledAt
+    if ($offRaw) {
+      $offDto = [DateTimeOffset]::Parse($offRaw, [Globalization.CultureInfo]::InvariantCulture)
+      $offAtText = $offDto.LocalDateTime.ToString('yyyy-MM-dd HH:mm')
+    }
+  } catch { }
+  $offMsg = 'dsh 委派已关闭'
+  if ($offAtText) { $offMsg += "（关闭于 $offAtText）" }
+  $offMsg += '：本次不派发。重新开启：/dsh-delegate-kit on（Codex：$dsh-delegate-kit on）'
+  Exit-With 'DSH_DISABLED' $offMsg 6
 }
 $statePath = Join-Path $kitHome 'state.json'
 if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
@@ -1243,4 +1260,4 @@ $progressLine
   }
 }
 
-switch ($status) { 'OK' { exit 0 } 'DSH_UNAVAILABLE' { exit 3 } 'TIMEOUT' { exit 4 } 'DSH_INCOMPATIBLE' { exit 5 } default { exit 1 } }
+switch ($status) { 'OK' { exit 0 } 'DSH_UNAVAILABLE' { exit 3 } 'TIMEOUT' { exit 4 } 'DSH_INCOMPATIBLE' { exit 5 } 'DSH_DISABLED' { exit 6 } default { exit 1 } }

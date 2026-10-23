@@ -24,13 +24,15 @@
 |---|---|---|
 | `help` | 显示本说明 | — |
 | `setup` | 初始化。第一段列出候选（模型及能力、思考档、权限），你在聊天里选；第二段生成配置并自检 | 第二段：`-Model <provider/id> -Effort <档\|auto> -Mode <权限>`；选完全权限加 `-AcknowledgeFullAccess`；需要对齐插件时 `-InstallPlugins`（先征求你同意） |
-| `status` | 当前配置：模型、能否看图、上下文窗口、支持的思考档、思考模式、默认权限、可选功能、dsh 版本、上次自检 | — |
+| `status` | 当前配置：模型、能否看图、上下文窗口、支持的思考档、思考模式、默认权限、可选功能、dsh 版本、上次自检、委派开关 | — |
 | `check` | 自检，不调模型、不花 token：dsh 版本对比基线、补丁能否解析、必需插件、模型是否仍支持所选思考档、可选功能 | `-UpdateBaseline`：通过后把当前 dsh 版本记为新基线 |
 | `repair` | dsh 升级或自检失败后修复：重新识别插件、按当前模型目录重新生成补丁、再自检 | `-InstallPlugins`：把 headless 插件版本对齐到 dsh（先征求你同意） |
 | `stats` | 委派效率统计（按思考档、是否挂浏览器分组：次数、耗时、步数、工具调用、token） | `-Days <n>`：只看最近 n 天 |
 | `diag` | 生成诊断包 zip（版本、自检结果、日志末尾、状态文件；已脱敏，不含任何 Key） | — |
 | `update` | 查询新版 kit：显示当前版本、最新版本、更新内容（只拉到临时目录比对，不改动已安装文件） | `-Apply`：确认后运行 `npx skills update dsh-delegate-kit -g`（Claude、Codex 共用一份），再自检；`-Force`：没有新版也更新 |
 | `rules` | 查看或追加全局规则段落（让主 Agent 主动委派） | `-Host claude\|codex`；`-Show` 只看；`-Apply` 追加（会先备份）；`-RulesFile <路径>` 指定文件 |
+| `off` | 关闭两个宿主的 dsh 委派：移除 `CLAUDE.md` / `AGENTS.md` 里 kit 追加的规则段落（先备份），在 `KIT_HOME` 写 `off.json`；之后派发返回 `DSH_DISABLED` | — |
+| `on` | 重新开启：按当前配置把关闭时移除的规则段落写回（先备份），删除 `off.json` | — |
 | `uninstall` | 卸载 | `-Host claude\|codex` 只移除该宿主的规则段落；不传 `-Host` 时移除两边规则并删除补丁和状态；`-PurgeLogs` 删日志。之后用 `npx skills remove dsh-delegate-kit -g` 删除 Skill 文件 |
 
 所有子命令都支持 `-Json`（输出机器可读的 JSON）。
@@ -62,6 +64,15 @@ Claude 用 `scripts\dsh-run.ps1`，Codex 用 `scripts\dsh-dispatch.ps1`，参数
 | `DSH_UNAVAILABLE` | 未初始化、dsh 不存在、凭证或额度问题 | 回退到宿主自带方式，并告诉你原因 |
 | `DSH_INCOMPATIBLE` | dsh 升级后不兼容，或所需可选功能不可用 | 回退并建议运行 `repair` |
 | `DSH_INCOMPATIBLE` + `FORMAT: output` | dsh 跑完了，但 kit 认不出新版 dsh 的输出格式 | 先核对工作区（任务可能已做完），只补做剩下的部分；建议运行 `update`，或回退 dsh |
+| `DSH_DISABLED` | 委派已被 `off` 关闭 | 不派 dsh，按你的其他规则或亲自完成，需要时运行 `on` |
+
+## 暂时不想用 dsh 委派
+
+运行 `off`（Claude：`/dsh-delegate-kit off`，Codex：`$dsh-delegate-kit off`）会一条命令同时关闭两个宿主的委派：从 `CLAUDE.md` / `AGENTS.md` 移除 kit 追加的规则段落（只处理 kit 安装过段落的宿主），移除前备份到 `KIT_HOME\backups\<host>-off-<时间>.bak`，并在 `KIT_HOME` 写 `off.json`。你自己写的规则（例如原来的“派给 haiku 子 Agent”）不受影响，段落移除后自然恢复生效。
+
+关闭期间，派发脚本（`dsh-run.ps1`、`dsh-dispatch.ps1`）一律拒绝启动 dsh，返回 `DSH_DISABLED`（退出码 6）；`rules -Apply` 和 setup 第 7 步也会被拒绝并提示先运行 `on`；`status` 的“委派开关”一行显示已关闭及时间。全局规则在会话开始时加载，所以新会话完全按关闭后的规则工作；当前会话里主 Agent 根据命令输出知道状态，off 之后不再派发。
+
+要恢复时运行 `on`：它按当前配置把段落写回（写入前备份），并删除 `off.json`；关闭期间对该段落的手动修改不会保留（原文在关闭时的备份里）。已经开启时提示“已经是开启状态”。`uninstall` 会一并清理 `off.json`（all）或把对应宿主从中去掉（单宿主）。
 
 ## dsh 升级后失效怎么办
 

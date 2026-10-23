@@ -1,6 +1,6 @@
 ---
 name: dsh-delegate-kit
-description: 把执行类工作委派给命令行版 dsh（DeepSeek Harness，dsh headless，模型由用户在 setup 时选定）：主 Agent 负责思考、写任务单、审核，dsh 负责写代码、检索定位、构建测试、排查取证、网页和桌面操作。用户说 /dsh-delegate-kit 或 $dsh-delegate-kit（含 help、setup、status、check、repair、stats、diag、rules、update、uninstall），说“交给 dsh 做”“派给 dsh”，或全局规则要求委派时使用。Delegates coding, search, build/test and browser/desktop work from Claude Code or Codex to the dsh CLI on Windows.
+description: 把执行类工作委派给命令行版 dsh（DeepSeek Harness，dsh headless，模型由用户在 setup 时选定）：主 Agent 负责思考、写任务单、审核，dsh 负责写代码、检索定位、构建测试、排查取证、网页和桌面操作。用户说 /dsh-delegate-kit 或 $dsh-delegate-kit（含 help、setup、status、check、repair、stats、diag、rules、update、uninstall、on、off），说“交给 dsh 做”“派给 dsh”，或全局规则要求委派时使用。Delegates coding, search, build/test and browser/desktop work from Claude Code or Codex to the dsh CLI on Windows.
 ---
 
 # dsh-delegate-kit（通用入口）

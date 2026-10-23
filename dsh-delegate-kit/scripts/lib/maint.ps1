@@ -701,7 +701,8 @@ function Invoke-KitRules {
     [string]$HostName = '',
     [switch]$Show,
     [switch]$Apply,
-    [string]$RulesFile
+    [string]$RulesFile,
+    [switch]$IgnoreOff
   )
 
   $h = if ($HostName) { $HostName.Trim().ToLowerInvariant() } else { '' }
@@ -713,6 +714,11 @@ function Invoke-KitRules {
   }
 
   $paths = Get-KitPaths
+  $isOff = Test-Path -LiteralPath $paths.Off -PathType Leaf
+  if ($Apply -and $isOff -and -not $IgnoreOff) {
+    $msg = 'dsh 委派当前已关闭，先运行 on（会自动恢复关闭前的规则段落）'
+    return [ordered]@{ ExitCode = 1; Result = [ordered]@{ file = (Get-KitRulesTarget $h $RulesFile); disabled = $true; error = $msg }; Text = $msg }
+  }
   $file = Get-KitRulesTarget $h $RulesFile
   $info = Read-KitRulesFileInfo $file
   if ($Apply -and $info.Exists -and -not $info.EncodingOk) {
@@ -737,15 +743,17 @@ function Invoke-KitRules {
       "已安装规则段落：$(if ($already) { '是' } else { '否' })",
       "换行风格：$(if ($info.Nl -eq "`r`n") { 'CRLF' } else { 'LF' })",
       "写入前会备份到 $($paths.Backups)",
-      '',
-      '将要追加的内容：',
       ''
     )
+    if ($isOff) {
+      $lines = @($lines[0..3]) + @('注意：dsh 委派当前已关闭，需要先运行 on 才能追加') + @($lines[4..($lines.Count - 1)])
+    }
+    $lines += @('将要追加的内容：', '')
     $text = ($lines -join "`n") + $block
     if (-not $text.EndsWith("`n")) { $text += "`n" }
     return [ordered]@{
       ExitCode = 0
-      Result = [ordered]@{ file = $file; exists = [bool]$info.Exists; alreadyInstalled = $already; block = $block }
+      Result = [ordered]@{ file = $file; exists = [bool]$info.Exists; alreadyInstalled = $already; disabled = [bool]$isOff; block = $block }
       Text = $text
     }
   }
@@ -873,7 +881,7 @@ function Remove-KitSkill([string]$hostName, [string]$skillsDir = '') {
   return $step
 }
 
-function Remove-KitRulesBlock([string]$hostName, [string]$file, [string]$stamp) {
+function Remove-KitRulesBlock([string]$hostName, [string]$file, [string]$stamp, [string]$tag = 'uninstall') {
   $res = [ordered]@{ host = $hostName; file = $file; status = 'skipped'; backup = $null; warning = $null; message = ''; createdByKit = $false; deleted = $false }
   $info = Read-KitRulesFileInfo $file
   if (-not $info.Exists) { $res.message = '文件不存在，跳过'; return $res }
@@ -924,7 +932,7 @@ function Remove-KitRulesBlock([string]$hostName, [string]$file, [string]$stamp) 
   $backup = $null
   try {
     if (-not (Test-Path -LiteralPath $paths.Backups)) { New-Item -ItemType Directory -Force -Path $paths.Backups | Out-Null }
-    $backup = Join-Path $paths.Backups ($hostName + '-uninstall-' + $stamp + '.bak')
+    $backup = Join-Path $paths.Backups ($hostName + '-' + $tag + '-' + $stamp + '.bak')
     [IO.File]::Copy($file, $backup, $true)
     $newText = $info.Text.Remove($start, $end - $start)
     if ($res.createdByKit -and $newText.Length -eq 0) {
@@ -942,6 +950,198 @@ function Remove-KitRulesBlock([string]$hostName, [string]$file, [string]$stamp) 
     $res.message = $_.Exception.Message
   }
   return $res
+}
+
+# ---------------------------------------------------------------- on / off
+
+function Invoke-KitOff {
+  $paths = Get-KitPaths
+  if (Test-Path -LiteralPath $paths.Off -PathType Leaf) {
+    $existing = $null
+    try { $existing = Read-KitJson $paths.Off } catch { $existing = $null }
+    $existingAt = [string](Get-KitProp $existing 'disabledAt')
+    $atText = ConvertTo-KitLocalTimeText $existingAt
+    $when = if ($atText) { "（关闭于 $atText）" } else { '' }
+    return [ordered]@{
+      ExitCode = 0
+      Result = [ordered]@{ enabled = $false; alreadyDisabled = $true; disabledAt = $existingAt; offPath = $paths.Off }
+      Text = "dsh 委派已经是关闭状态$when。重新开启：on"
+    }
+  }
+
+  $disabledAt = (Get-Date).ToString('o')
+  $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+  $hosts = [ordered]@{}
+  $hostLines = New-Object System.Collections.ArrayList
+  $rules = $null
+  $rulesError = ''
+  try { $rules = Read-KitJson (Join-Path $paths.Home 'rules.json') } catch { $rulesError = $_.Exception.Message }
+
+  foreach ($h in @('claude', 'codex')) {
+    $record = Get-KitProp $rules $h
+    if (-not $record) {
+      $hosts[$h] = [ordered]@{ hadRules = $false; file = $null; backup = $null; status = 'none'; message = '没有安装过全局规则' }
+      [void]$hostLines.Add("[$h] 跳过：没有安装过全局规则")
+      continue
+    }
+    $file = [string](Get-KitProp $record 'file')
+    $rr = [ordered]@{ host = $h; file = $file; status = 'skipped'; backup = $null; warning = $null; message = '规则记录缺少文件路径，跳过'; createdByKit = $false; deleted = $false }
+    if ($file) {
+      try { $rr = Remove-KitRulesBlock $h $file $stamp 'off' } catch { $rr.status = 'failed'; $rr.message = $_.Exception.Message }
+    }
+    $status = [string]$rr.status
+    $backup = $rr.backup
+    $hadRules = $false
+    if ($status -eq 'removed') {
+      Remove-KitRulesRecord $h
+      $hadRules = $true
+      [void]$hostLines.Add("[$h] 已移除规则段落：$file")
+      [void]$hostLines.Add("  备份：$backup")
+    } elseif ($status -eq 'skipped') {
+      Remove-KitRulesRecord $h
+      [void]$hostLines.Add("[$h] 跳过：$($rr.message)（$file）")
+    } elseif ($status -eq 'warn') {
+      [void]$hostLines.Add("[$h] 警告：$($rr.message)（$file）")
+    } else {
+      $status = 'failed'
+      [void]$hostLines.Add("[$h] 移除失败：$($rr.message)（$file）")
+    }
+    if ($rr.warning) { [void]$hostLines.Add("  注意：$($rr.warning)") }
+    $hosts[$h] = [ordered]@{ hadRules = $hadRules; file = $file; backup = $backup; status = $status; message = [string]$rr.message }
+  }
+
+  $offObj = [ordered]@{
+    schemaVersion = 1
+    disabledAt    = $disabledAt
+    kitVersion    = $script:KitVersion
+    hosts         = $hosts
+  }
+  try {
+    Write-KitJson $paths.Off $offObj
+  } catch {
+    return [ordered]@{
+      ExitCode = 1
+      Result = [ordered]@{ enabled = $true; error = "写入 off.json 失败: $($_.Exception.Message)"; hosts = $hosts; offPath = $paths.Off }
+      Text = "关闭 dsh 委派失败：写入 off.json 失败（$($_.Exception.Message)）。"
+    }
+  }
+
+  $failed = @($hosts.Values | Where-Object { $_.status -eq 'warn' -or $_.status -eq 'failed' })
+  $lines = New-Object System.Collections.ArrayList
+  [void]$lines.Add('已关闭 dsh 委派：派发脚本会拒绝启动 dsh（返回 DSH_DISABLED）。')
+  foreach ($ln in $hostLines) { [void]$lines.Add($ln) }
+  if ($rulesError) { [void]$lines.Add("注意：读取 rules.json 失败，未处理任何 host：$rulesError") }
+  [void]$lines.Add('规则文件里你自己写的其他规则保持不变；新会话起按它们工作，当前会话从现在起也不再派发给 dsh。')
+  [void]$lines.Add('重新开启：on（会按当前配置把规则段落写回去）')
+  return [ordered]@{
+    ExitCode = $(if ($failed.Count -gt 0) { 1 } else { 0 })
+    Result = [ordered]@{ enabled = $false; disabledAt = $disabledAt; hosts = $hosts; offPath = $paths.Off }
+    Text = ($lines -join "`n")
+  }
+}
+
+function Invoke-KitOn {
+  $paths = Get-KitPaths
+  if (-not (Test-Path -LiteralPath $paths.Off -PathType Leaf)) {
+    $rules = $null
+    try { $rules = Read-KitJson (Join-Path $paths.Home 'rules.json') } catch { $rules = $null }
+    $hasAny = [bool](Get-KitProp $rules 'claude') -or [bool](Get-KitProp $rules 'codex')
+    $lines = @('dsh 委派已经是开启状态。')
+    if (-not $hasAny) {
+      $lines += '（没有安装全局规则：只在点名时派发；需要主 Agent 自动委派请运行 rules）'
+    }
+    return [ordered]@{
+      ExitCode = 0
+      Result = [ordered]@{ enabled = $true; hosts = [ordered]@{}; offPath = $paths.Off }
+      Text = ($lines -join "`n")
+    }
+  }
+
+  $off = $null
+  $parseError = $false
+  try {
+    $off = Read-KitJson $paths.Off
+    if ($null -eq $off) { $parseError = $true }
+  } catch {
+    $parseError = $true
+  }
+  $offHosts = if ($parseError) { $null } else { Get-KitProp $off 'hosts' }
+  $restoreHosts = @()
+  foreach ($h in @('claude', 'codex')) {
+    $hs = Get-KitProp $offHosts $h
+    if ((Get-KitProp $hs 'hadRules') -eq $true) { $restoreHosts += $h }
+  }
+  if ($restoreHosts.Count -gt 0 -and -not (Test-Path -LiteralPath $paths.State -PathType Leaf)) {
+    return [ordered]@{
+      ExitCode = 2
+      Result = [ordered]@{ enabled = $false; error = 'dsh-delegate-kit 尚未初始化：先运行 setup'; hosts = [ordered]@{}; offPath = $paths.Off }
+      Text = 'dsh-delegate-kit 尚未初始化：先运行 setup'
+    }
+  }
+
+  $hostResults = [ordered]@{}
+  $hostLines = New-Object System.Collections.ArrayList
+  foreach ($h in @('claude', 'codex')) {
+    $hs = Get-KitProp $offHosts $h
+    $hadRules = ((Get-KitProp $hs 'hadRules') -eq $true)
+    if (-not $hadRules) {
+      $msg = if ($parseError) { 'off.json 解析失败，跳过' } else { '关闭前没有规则段落，跳过' }
+      $hostResults[$h] = [ordered]@{ status = 'skipped'; file = $null; backup = $null; message = $msg }
+      [void]$hostLines.Add("[$h] $msg")
+      continue
+    }
+    $file = [string](Get-KitProp $hs 'file')
+    if (-not $file) {
+      $msg = 'off.json 缺少规则文件路径，拒绝恢复到默认文件'
+      $hostResults[$h] = [ordered]@{ status = 'failed'; file = $null; backup = $null; message = $msg }
+      [void]$hostLines.Add("[$h] 恢复失败：$msg")
+      continue
+    }
+    $r = $null
+    $err = ''
+    try { $r = Invoke-KitRules -HostName $h -Apply -RulesFile $file -IgnoreOff } catch { $err = $_.Exception.Message }
+    $already = if ($r) { (Get-KitProp $r.Result 'alreadyInstalled') -eq $true } else { $false }
+    if ($r -and ([int]$r.ExitCode -eq 0 -or $already)) {
+      $backup = if ($r.Result) { [string](Get-KitProp $r.Result 'backup') } else { '' }
+      $msg = if ($already) { '规则段落已在文件里' } else { '已按当前配置重新写入规则段落' }
+      $status = if ($already) { 'alreadyInstalled' } else { 'restored' }
+      $hostResults[$h] = [ordered]@{ status = $status; file = $file; backup = $backup; message = $msg }
+      [void]$hostLines.Add("[$h] $msg：$file")
+      if ($backup) { [void]$hostLines.Add("  写入前备份：$backup") }
+    } else {
+      if (-not $err -and $r -and $r.Text) { $err = [string]$r.Text }
+      if (-not $err) { $err = '恢复规则失败' }
+      $hostResults[$h] = [ordered]@{ status = 'failed'; file = $file; backup = $null; message = $err }
+      [void]$hostLines.Add("[$h] 恢复失败：$err")
+    }
+  }
+
+  $allOk = -not [bool]($hostResults.Values | Where-Object { $_.status -eq 'failed' })
+  $deleteError = ''
+  if ($allOk) {
+    try {
+      Remove-Item -LiteralPath $paths.Off -Force -ErrorAction Stop
+    } catch {
+      $allOk = $false
+      $deleteError = $_.Exception.Message
+    }
+  }
+  $enabled = -not (Test-Path -LiteralPath $paths.Off -PathType Leaf)
+
+  $lines = New-Object System.Collections.ArrayList
+  [void]$lines.Add($(if ($enabled) { '已开启 dsh 委派。' } else { '开启 dsh 委派未完成。' }))
+  if ($parseError) { [void]$lines.Add('注意：off.json 解析失败，按没有需要恢复的规则处理。') }
+  foreach ($ln in $hostLines) { [void]$lines.Add($ln) }
+  if ($deleteError) { [void]$lines.Add("删除 off.json 失败：$deleteError") }
+  if (-not $enabled) { [void]$lines.Add('恢复未全部成功，off.json 已保留；修复后重试：on') }
+  if ($enabled) {
+    [void]$lines.Add('新会话起生效（会话开始时才加载全局规则）；关闭前对规则段落的手动修改不会保留，原文见关闭时的备份。')
+  }
+  return [ordered]@{
+    ExitCode = $(if ($enabled) { 0 } else { 1 })
+    Result = [ordered]@{ enabled = $enabled; hosts = $hostResults; offPath = $paths.Off }
+    Text = ($lines -join "`n")
+  }
 }
 
 function Test-KitSamePath([string]$a, [string]$b) {
@@ -1012,6 +1212,33 @@ function Invoke-KitUninstall {
     if ($rr.warning) { [void]$textLines.Add("  注意：$($rr.warning)") }
   }
 
+  # 单个 host 卸载后同步 off.json，避免之后 on 又把刚卸载的规则写回去。
+  if ($h -ne 'all' -and (Test-Path -LiteralPath $paths.Off -PathType Leaf)) {
+    $offObj = $null
+    try { $offObj = Read-KitJson $paths.Off } catch { $offObj = $null }
+    if ($offObj) {
+      $offHosts = Get-KitProp $offObj 'hosts'
+      $newHosts = [ordered]@{}
+      foreach ($other in @('claude', 'codex')) {
+        if ($other -eq $h) {
+          $newHosts[$other] = [ordered]@{ hadRules = $false; file = $null; backup = $null; status = 'none'; message = '已 uninstall' }
+        } else {
+          $v = Get-KitProp $offHosts $other
+          if ($null -ne $v) { $newHosts[$other] = $v }
+        }
+      }
+      $newOff = [ordered]@{
+        schemaVersion = (Get-KitProp $offObj 'schemaVersion')
+        disabledAt    = (Get-KitProp $offObj 'disabledAt')
+        kitVersion    = (Get-KitProp $offObj 'kitVersion')
+        hosts         = $newHosts
+      }
+      try { Write-KitJson $paths.Off $newOff } catch {
+        [void]$textLines.Add("更新 off.json 失败：$($_.Exception.Message)")
+      }
+    }
+  }
+
   if ($RemoveSkills) {
     foreach ($hostName in $hosts) {
       $skillsDir = if ($hostName -eq 'claude') { $ClaudeSkillsDir } else { $CodexSkillsDir }
@@ -1037,6 +1264,7 @@ function Invoke-KitUninstall {
       [ordered]@{ Key = 'patches'; Path = $paths.Patches; Label = '补丁目录' },
       [ordered]@{ Key = 'state'; Path = $paths.State; Label = 'state.json' },
       [ordered]@{ Key = 'rules'; Path = (Join-Path $paths.Home 'rules.json'); Label = 'rules.json' },
+      [ordered]@{ Key = 'off'; Path = $paths.Off; Label = 'off.json' },
       [ordered]@{ Key = 'spec'; Path = (Join-Path $paths.Home 'spec.json'); Label = 'spec.json' },
       [ordered]@{ Key = 'check'; Path = (Join-Path $paths.Home 'check'); Label = 'check 目录' }
     )

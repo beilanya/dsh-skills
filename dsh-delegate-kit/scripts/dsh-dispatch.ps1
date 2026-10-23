@@ -9,6 +9,10 @@ dsh-dispatch.ps1 — Codex 专用 DSH 委派入口（dsh-delegate-kit 版）。
   taskId / workerPid / label / request / summary / completion / logPrefix
   jsonl / progress / extend / runnerMarker 路径在启动前即可见（文件可能尚未出现）。
 
+off.json 存在时，父进程在参数校验前输出 STATUS: DSH_DISABLED 并 exit 6，
+不写 request/marker、不启动 worker、不回调。worker 会透传 runner 的 DSH_DISABLED，
+并原样写入 summary/completion 与完成回调。
+
 worker 每 5 秒等待 runner，并按 runner 自己 .run.running 中可信的 deadline 延长
 看门狗；runner stdout/stderr 实时写入独立 .runner.out.txt/.runner.err.txt。
 回调只表示 queued，不代表 delivered；失败不覆盖 DSH 结果。
@@ -58,6 +62,22 @@ function Fail-BeforeStart([string]$message) {
   Write-Output 'STATUS: FAILED'
   Write-Output $message
   exit 2
+}
+
+function Get-DisabledMessage {
+  $disabledAt = ''
+  try {
+    $off = [IO.File]::ReadAllText((Join-Path $kitHome 'off.json'), $script:Utf8) | ConvertFrom-Json
+    $raw = [string]$off.disabledAt
+    if ($raw) {
+      $dto = [DateTimeOffset]::Parse($raw, [Globalization.CultureInfo]::InvariantCulture)
+      $disabledAt = $dto.LocalDateTime.ToString('yyyy-MM-dd HH:mm')
+    }
+  } catch { }
+  $msg = 'dsh 委派已关闭'
+  if ($disabledAt) { $msg += "（关闭于 $disabledAt）" }
+  $msg += '：本次不派发。重新开启：/dsh-delegate-kit on（Codex：$dsh-delegate-kit on）'
+  return $msg
 }
 
 function ConvertTo-QuotedArgument([string]$value) {
@@ -792,7 +812,7 @@ function Invoke-Worker([string]$requestPath) {
     if ($run.Deadline) { $deadlineText = [string]$run.Deadline }
     if ($null -ne $run.ExtendedMin) { $extendedMin = [int]$run.ExtendedMin }
 
-    $match = [regex]::Match($runnerOutput, '(?m)^STATUS:\s*(OK|DSH_UNAVAILABLE|TIMEOUT|FAILED|DSH_INCOMPATIBLE)\s*$')
+    $match = [regex]::Match($runnerOutput, '(?m)^STATUS:\s*(OK|DSH_UNAVAILABLE|TIMEOUT|FAILED|DSH_INCOMPATIBLE|DSH_DISABLED)\s*$')
     if ($match.Success) {
       $status = $match.Groups[1].Value
     } elseif ($run.TimedOut) {
@@ -994,6 +1014,11 @@ function Write-StartFailure($request, [bool]$notify, [string]$threadId, [string]
 }
 
 function Invoke-ParentDispatch {
+  if (Test-Path -LiteralPath (Join-Path $kitHome 'off.json') -PathType Leaf) {
+    Write-Output 'STATUS: DSH_DISABLED'
+    Write-Output (Get-DisabledMessage)
+    exit 6
+  }
   if ($TaskFile -and $Task) { Fail-BeforeStart '只能提供 -TaskFile 或 -Task 之一' }
   if (-not $TaskFile -and -not $Task) { Fail-BeforeStart '必须提供 -TaskFile 或 -Task' }
   if ($TaskFile -and -not (Test-Path -LiteralPath $TaskFile -PathType Leaf)) { Fail-BeforeStart "找不到任务单: $TaskFile" }

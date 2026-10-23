@@ -2,7 +2,7 @@
 
 本文件说明这个包的组成、运行时数据、已核实的关键事实、兼容与升级机制、排障步骤和回归清单。改动脚本或 dsh 升级后，先读本文件，再按第 6 节回归。
 
-当前版本：`0.3.0`（2026-10-23）。
+当前版本：`0.4.0`（2026-10-23）。
 
 ## 1. 组成文件
 
@@ -14,7 +14,7 @@
 | `hosts\claude-code.md` | Claude Code 侧的 setup/派发/审核/续接流程和提示格式。不能叫 `claude.md`：Windows 不区分大小写，会被 Claude Code 当成 `CLAUDE.md` 记忆文件自动加载 | UTF-8 无 BOM |
 | `hosts\codex.md` | Codex 侧的 setup/dispatch/回调/审核/续接流程 | UTF-8 无 BOM |
 | `README.md` | 面向第一次安装的用户：前置条件、安装、配置、子命令、权限、兼容性、卸载、常见问题 | UTF-8 无 BOM |
-| `scripts\kit.ps1` | 子命令入口：setup、check、repair、status、stats、diag、rules、uninstall、update、help | UTF-8 **带 BOM** |
+| `scripts\kit.ps1` | 子命令入口：setup、check、repair、status、stats、diag、rules、on、off、uninstall、update、help | UTF-8 **带 BOM** |
 | `scripts\dsh-run.ps1` | 执行器：预检、拼补丁、启动 `dsh headless --json`、解析事件、写摘要和 index；自包含，不 dot-source `common.ps1` | UTF-8 **带 BOM** |
 | `scripts\dsh-dispatch.ps1` | Codex 专用：隐藏启动独立 worker，worker 调 `dsh-run.ps1`，完成后用 `codex queue` 回调 | UTF-8 **带 BOM** |
 | `scripts\uia.ps1` | UIA 辅助脚本：按元素名称读取、点击、输入、等待，供电脑操作任务使用 | UTF-8 **带 BOM** |
@@ -54,8 +54,9 @@
 | `backups\` | 追加或移除规则前的备份；`uninstall` 永远保留 |
 | `diag\` | `diag-<时间戳>\` 目录和 `diag-<时间戳>.zip` |
 | `rules.json` | 记录每个宿主规则文件的路径、备份路径、追加前后 sha256 和 `createdByKit` |
+| `off.json` | 委派已关闭的标记、关闭时间、被移除的宿主段落和备份路径；`off` 写，`on` 删，`uninstall` 清理 |
 
-`uninstall`（不传 `-Host`，即 all）会删除 `patches\`、`state.json`、`rules.json`、`spec.json`、`check\`；`logs\` 只在 `-PurgeLogs` 时删除；`backups\` 始终保留。只传 `-Host claude|codex` 时只移除该宿主的规则段落，`patches\`、`state.json`、`spec.json`、`check\` 都不删；`rules.json` 会移除该宿主的记录，记录为空时删除文件。
+`uninstall`（不传 `-Host`，即 all）会删除 `patches\`、`state.json`、`rules.json`、`spec.json`、`check\`；`logs\` 只在 `-PurgeLogs` 时删除；`backups\` 始终保留。只传 `-Host claude|codex` 时只移除该宿主的规则段落，`patches\`、`state.json`、`spec.json`、`check\` 都不删；`rules.json` 会移除该宿主的记录，记录为空时删除文件。`off.json` 在 all 时删除；单宿主时把该宿主记为没有规则段落（之后 `on` 不会写回），文件本身保留，委派仍是关闭状态。
 
 skill 文件用 `npx skills remove dsh-delegate-kit -g` 删除。`-RemoveSkills` 只为 0.3.0 以前 `install.ps1` 装的旧副本保留：只删除带 `.kit-install.json` 的 `dsh-delegate-kit` 目录，可用 `-ClaudeSkillsDir` / `-CodexSkillsDir` 指定 skills 根目录；没有标记的目录会拒绝并提示改用 `npx skills remove`。规则文件原本不存在、由 kit 创建时，移除段落后内容为空会删除该文件。任一规则段落移除失败（warn/failed）时跳过全部清理并返回 1。
 
@@ -64,7 +65,7 @@ skill 文件用 `npx skills remove dsh-delegate-kit -g` 删除。`-RemoveSkills`
 | 字段 | 含义 |
 |---|---|
 | `schemaVersion` | 状态结构版本，当前为 1 |
-| `kitVersion` | 最近一次 setup 或通过的 `check -UpdateBaseline` 所用的 kit 版本，当前 `0.3.0` |
+| `kitVersion` | 最近一次 setup 或通过的 `check -UpdateBaseline` 所用的 kit 版本，当前 `0.4.0` |
 | `createdAt` / `updatedAt` | 创建/最后更新时间（ISO 8601） |
 | `dshHome` | 使用的 DSH_HOME |
 | `dshVersion` | 基线 dsh 版本；派发前预检用它比对 |
@@ -238,7 +239,7 @@ console.log((text.match(/compaction\/start/g) || []).length);
 
 `dsh-run.ps1` 启动 dsh 前做轻量检查：
 
-1. 读 `state.json`；不存在、dsh/node 找不到 → `DSH_UNAVAILABLE`，exit 3。
+1. 读 `state.json`；不存在、dsh/node 找不到 → `DSH_UNAVAILABLE`，exit 3。`off.json` 存在 → `DSH_DISABLED`，exit 6，不启动 dsh。
 2. 运行前先做输入校验：`-Cwd` 以 `\\` 开头（UNC）→ `FAILED` exit 2，提示先映射盘符；`-TimeoutMin` 小于 1 → `FAILED` exit 2；任务单不存在或读取失败 → `FAILED` exit 2。
 3. 定位 dsh 包目录时优先用当前命令解析出的 `<base>\node_modules\@deepseek-ai\dsh`，`state.dshPackageDir` 只作后备；后续 check 也使用同一实际目录。
 4. 当前 dsh 版本与 `state.dshVersion` 不一致，或任一补丁文件缺失/sha256 不符，或 `state.lastCheck.ok` 不是 true → 需要 check。
@@ -256,6 +257,8 @@ console.log((text.match(/compaction\/start/g) || []).length);
 ### 运行后的状态判定
 
 `Resolve-RunStatus` 按顺序判定：超时 → `TIMEOUT`；启动失败 → `FAILED`；exit 0 且 `turn_end` 的 `reason.kind=completed` 且有 `final` → `OK`；stderr/错误事件匹配凭证、鉴权、额度关键词 → `DSH_UNAVAILABLE`；exit 0 但一个已知事件都没识别到、或识别不到 `turn_end` → `DSH_INCOMPATIBLE` 并输出 `FORMAT: output`；其余 → `FAILED`。
+
+派发前已关闭委派（存在 `off.json`）时不进入上述判定：直接返回 `DSH_DISABLED`，exit 6，不启动 dsh。
 
 `FORMAT: output` 说明 dsh 的 `--json` 事件格式变了（check 不调模型，发现不了这类变化）。dsh 很可能已经执行了任务，主 Agent 应先核对工作区再补做。修复方法是按新格式更新 `Read-DshEvents`，回归后发新版 kit。OK 但没识别到任何 `step_end` 时，摘要会警告统计可能不准，也是格式变化的信号。
 
@@ -618,8 +621,36 @@ Test-Path (Join-Path $env:DSH_KIT_HOME 'patches')        # True：拒绝清理�
 
 另测 `KIT_HOME` 等于 `DSH_HOME` 或 `patches` 等于 `<DSH_HOME>\patches` 时同样返回 1；规则段落只有 begin 没有 end 时也应返回 1、`ruleFailures` 计数为 1，且 state/patches 不被删除。测试结束恢复 `$env:USERPROFILE`。
 
+### 6.11 on / off
+
+用假 `USERPROFILE` 和临时 KIT_HOME，规则文件里预置一条用户自己的委派规则：
+
+```powershell
+$fakeHome = Join-Path $root 'off-home'
+New-Item -ItemType Directory -Force -Path (Join-Path $fakeHome '.claude') | Out-Null
+$rules = Join-Path $fakeHome '.claude\CLAUDE.md'
+[IO.File]::WriteAllText($rules, "# test`n`n- 委派时优先派给 haiku 子 Agent。`n", $utf8)
+$env:USERPROFILE = $fakeHome
+powershell -NoProfile -ExecutionPolicy Bypass -File $kit rules -Host claude -Apply
+powershell -NoProfile -ExecutionPolicy Bypass -File $kit off
+$offText = [IO.File]::ReadAllText($rules, $utf8)
+$offText                                                # kit 段落消失，haiku 那条逐字保留
+Test-Path (Join-Path $env:DSH_KIT_HOME 'off.json')       # True
+powershell -NoProfile -ExecutionPolicy Bypass -File $kit status   # 委派开关：已关闭（时间）
+powershell -NoProfile -ExecutionPolicy Bypass -File $kit rules -Host claude -Apply
+$LASTEXITCODE                                           # 非 0，提示先运行 on
+powershell -NoProfile -ExecutionPolicy Bypass -File '<skill目录>\scripts\dsh-run.ps1' -TaskFile $task -Cwd $root -Label off -TimeoutMin 5 -NoProtocol
+$LASTEXITCODE                                           # 6，首行 STATUS: DSH_DISABLED，未启动 dsh
+powershell -NoProfile -ExecutionPolicy Bypass -File $kit on
+Test-Path (Join-Path $env:DSH_KIT_HOME 'off.json')       # False
+[IO.File]::ReadAllText($rules, $utf8)                    # kit 段落按当前配置写回
+```
+
+检查：`off` 后 `backups\` 里有 `<host>-off-<时间>.bak`，用户原有规则逐字保留；`off.json` 存在时两个派发脚本都返回 `DSH_DISABLED`（exit 6），不启动 dsh；`on` 写回前有备份，已开启时再运行提示“已经是开启状态”。测试结束恢复 `$env:USERPROFILE`。
+
 ## 7. 变更记录
 
 - 0.1.0（2026-10-23）：首个版本。
 - 0.2.0（2026-10-23）：dsh 输出格式无法识别时返回 `DSH_INCOMPATIBLE` + `FORMAT: output`，不再误判为 FAILED；dsh 版本未经验证时在 check、status 和派发摘要里警告并给出回退命令；新增 `update` 子命令，从 gitee 检查并安装新版 kit；README 增加「dsh 升级后失效怎么办」。
 - 0.3.0（2026-10-23）：改为统一用 `npx skills add beilanya/dsh-skills --skill dsh-delegate-kit -g` 安装，装好后直接 setup；删除 `install.ps1` / `install.cmd` 和安装器 skill；新增通用入口 `SKILL.md`，宿主说明移到 `hosts\`；`update` 改为调用 `npx skills update`；旧方式安装的副本需要按 README 迁移一次。
+- 0.4.0（2026-10-23）：新增 `on` / `off` 子命令与 `off.json`；`off` 移除两个宿主的 kit 规则段落并写 `off.json`，`on` 按当前配置写回规则段落；新增 `DSH_DISABLED` 状态和退出码 6，关闭期间派发脚本拒绝启动 dsh；规则段落声明优先于用户其他委派规则，`off` 后用户原有规则恢复；关闭期间 `rules -Apply` 和 setup 第 7 步拒绝并提示先运行 `on`；`status` 显示委派开关；`uninstall` 清理 `off.json`。

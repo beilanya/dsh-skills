@@ -105,6 +105,8 @@ setup 完成并同意追加全局规则后，平时**不需要任何额外操作
 | 「先出方案，我确认后再派」 | 只给方案，等你确认 |
 | 「dsh 任务进度怎么样」 | 报告运行中任务的实际状态 |
 
+想暂停委派时，运行 `off`（Claude：`/dsh-delegate-kit off`，Codex：`$dsh-delegate-kit off`）：kit 会移除写进全局规则的段落并停止派发，你原来的规则（例如派给 haiku 子 Agent）自动恢复生效，新会话完全按关闭后的规则工作。要恢复时运行 `on`，段落会按当前配置写回。细节见 `docs\HELP.md` 的「暂时不想用 dsh 委派」。
+
 全部指令说明：Claude 里 `/dsh-delegate-kit help`，Codex 里 `$dsh-delegate-kit help`。没有追加全局规则时，kit 只在你点名时使用。
 
 ## 子命令

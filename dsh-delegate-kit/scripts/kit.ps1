@@ -14,6 +14,8 @@ kit.ps1 — dsh-delegate-kit 入口。用法：
   diag                       生成诊断包（不含 Key）
   rules -Host claude|codex -Show|-Apply [-RulesFile <路径>]
                              展示 / 追加全局规则段落（追加前备份）
+  on                         开启 dsh 委派（恢复 off 时移除的全局规则段落）
+  off                        关闭 dsh 委派（移除全局规则段落并备份，派发返回 DSH_DISABLED）
   uninstall [-Host claude|codex|all] [-RulesFile <路径>] [-RemoveSkills] [-PurgeLogs]
             [-ClaudeSkillsDir <目录>] [-CodexSkillsDir <目录>]
   update [-Apply] [-Force]    查询新版 kit；-Apply 时运行 npx skills update 更新并自检。
@@ -22,7 +24,7 @@ kit.ps1 — dsh-delegate-kit 入口。用法：
 #>
 param(
   [Parameter(Position = 0)]
-  [ValidateSet('setup', 'check', 'repair', 'status', 'stats', 'diag', 'rules', 'uninstall', 'update', 'help')]
+  [ValidateSet('setup', 'check', 'repair', 'status', 'stats', 'diag', 'rules', 'on', 'off', 'uninstall', 'update', 'help')]
   [string]$Command = 'help',
   [string]$Model,
   [string]$Effort,
@@ -63,6 +65,8 @@ switch ($Command) {
   'stats'     { $r = Invoke-KitStats -Days $Days }
   'diag'      { $r = Invoke-KitDiag }
   'rules'     { $r = Invoke-KitRules -HostName $HostName -Show:$Show -Apply:$Apply -RulesFile $RulesFile }
+  'on'        { $r = Invoke-KitOn }
+  'off'       { $r = Invoke-KitOff }
   'uninstall' { $r = Invoke-KitUninstall -HostName $HostName -RulesFile $RulesFile -RemoveSkills:$RemoveSkills -PurgeLogs:$PurgeLogs -ClaudeSkillsDir $ClaudeSkillsDir -CodexSkillsDir $CodexSkillsDir }
   'update'    { $r = Invoke-KitUpdate -Apply:$Apply -Force:$Force }
   default {
