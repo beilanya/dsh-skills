@@ -11,7 +11,8 @@
 | 文件 | 作用 | 编码 |
 |---|---|---|
 | `README.md` | 面向第一次安装的用户：前置条件、安装、setup、子命令、权限、兼容性、卸载、常见问题 | UTF-8 无 BOM |
-| `install.ps1` | 安装、覆盖、`-WhatIf` 预览、`-Uninstall` 卸载；只操作叶子名为 `dsh-delegate-kit` 的目录 | UTF-8 **带 BOM** |
+| `install.ps1` | 安装、覆盖、`-WhatIf` 预览、`-Uninstall` 卸载、`-Interactive` 菜单模式；只操作叶子名为 `dsh-delegate-kit` 的目录 | UTF-8 **带 BOM** |
+| `install.cmd` | 双击安装入口，只调用 `install.ps1 -Interactive`；内容保持纯 ASCII（`chcp 65001` 后 `set /p` 读不到输入，所以中文提示都放在 PowerShell 里） | ASCII，CRLF |
 | `claude\SKILL.md` | Claude Code 侧的 setup/派发/审核/续接流程和提示格式 | UTF-8 无 BOM |
 | `codex\SKILL.md` | Codex 侧的 setup/dispatch/回调/审核/续接流程 | UTF-8 无 BOM |
 | `scripts\kit.ps1` | 子命令入口：setup、check、repair、status、stats、diag、rules、uninstall、update、help | UTF-8 **带 BOM** |

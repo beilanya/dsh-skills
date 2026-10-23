@@ -12,7 +12,8 @@ param(
     [string]$CodexSkillsDir = '',
     [switch]$Force,
     [switch]$Uninstall,
-    [switch]$WhatIf
+    [switch]$WhatIf,
+    [switch]$Interactive
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +37,7 @@ function Show-Usage {
     Write-Human '  -Force                   目标已存在时覆盖重装'
     Write-Human '  -Uninstall               卸载 dsh-delegate-kit（只删除带 .kit-install.json 的目录）'
     Write-Human '  -WhatIf                  只列出将要复制/删除的文件，不改动磁盘'
+    Write-Human '  -Interactive             菜单方式选择宿主，失败时询问是否覆盖重装（install.cmd 双击时使用）'
     Write-Human ''
     Write-Human '示例：'
     Write-Human '  install.ps1 -Target both'
@@ -408,6 +410,55 @@ function Show-NextSteps {
         Write-Human '  Codex：在聊天里说「$dsh-delegate-kit setup」'
     }
     Write-Human '前置条件：先在 dsh 里配好模型和 API Key（推荐运行 dsh web，在 Models 页面配置）。'
+}
+
+# ---------------------------------------------------------------------------
+# 交互模式（install.cmd 双击入口）：选宿主，失败时询问是否覆盖，实际安装交给非交互的自身
+# ---------------------------------------------------------------------------
+
+if ($Interactive -and -not $Uninstall) {
+    if ([string]::IsNullOrWhiteSpace($Target)) {
+        Write-Human 'dsh-delegate-kit 安装'
+        Write-Human '  1. Claude Code（含 Claude 桌面端的 Code 页）'
+        Write-Human '  2. Codex（含 Codex 桌面端）'
+        Write-Human '  3. 两个都装'
+        for ($i = 0; $i -lt 3 -and [string]::IsNullOrWhiteSpace($Target); $i++) {
+            [Console]::Out.Write('请输入 1、2 或 3 后回车：')
+            $answer = [Console]::In.ReadLine()
+            if ($null -eq $answer) { break }
+            switch ($answer.Trim()) {
+                '1' { $Target = 'claude' }
+                '2' { $Target = 'codex' }
+                '3' { $Target = 'both' }
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($Target)) {
+            Write-Human '没有有效的选择，已取消安装。'
+            exit 2
+        }
+    }
+    $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-Target', $Target)
+    if ($ClaudeSkillsDir) { $childArgs += @('-ClaudeSkillsDir', $ClaudeSkillsDir) }
+    if ($CodexSkillsDir) { $childArgs += @('-CodexSkillsDir', $CodexSkillsDir) }
+    if ($WhatIf) { $childArgs += '-WhatIf' }
+    if ($Force) { $childArgs += '-Force' }
+    & $psExe @childArgs
+    $code = $LASTEXITCODE
+    if ($code -eq 1 -and -not $Force -and -not $WhatIf) {
+        Write-Human ''
+        Write-Human '安装未完成，原因见上方提示。如果提示已安装的版本与当前包不同，或你确认目标目录可以覆盖，可以覆盖重装。'
+        [Console]::Out.Write('是否覆盖重装？输入 y 确认，其他键取消：')
+        $yn = [Console]::In.ReadLine()
+        if ($null -ne $yn -and $yn.Trim() -ieq 'y') {
+            & $psExe @($childArgs + '-Force')
+            $code = $LASTEXITCODE
+        }
+        else {
+            Write-Human '已取消，未做改动。'
+        }
+    }
+    exit $code
 }
 
 # ---------------------------------------------------------------------------

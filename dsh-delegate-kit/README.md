@@ -34,20 +34,51 @@
 
 ## 安装
 
-先获取代码：
+三种方法任选一种，装完的结果完全一样。同一份安装同时适用于桌面端和命令行：
+
+- Claude 桌面端的 **Code** 页和命令行 `claude` 都读 `~\.claude\skills`；
+- Codex 桌面端和命令行 `codex` 都读 `~\.codex\skills`。
+
+> 不适用的通用入口：Claude 桌面端「设置」里上传 ZIP 的 Skills 是给 claude.ai 聊天用的，运行在云端，调用不了本机的 dsh；Codex 的 `$skill-installer` 只会原样复制仓库目录，不会按宿主选择 `SKILL.md`。这两种方式都装不了本 kit。
+
+### 方法一：图形化（下载 ZIP，双击安装）
+
+1. 浏览器打开 <https://gitee.com/beilanya/dsh-skills>，点「克隆/下载」→「下载 ZIP」（gitee 可能要求先登录），解压到任意目录。
+2. 进入解压出的 `dsh-delegate-kit` 文件夹，双击 **`install.cmd`**。
+   - 弹出「Windows 已保护你的电脑」时，点「更多信息」→「仍要运行」。也可以在解压前右键 ZIP →「属性」→ 勾选「解除锁定」。
+3. 在弹出的窗口里按提示输入数字后回车：`1` 只装 Claude Code，`2` 只装 Codex，`3` 两个都装。
+   - 已经装过别的版本时会询问是否覆盖，输入 `y` 回车即可。
+   - 看到「已安装 ...」后按任意键关闭窗口。
+4. 初始化：
+   - **Claude 桌面端**：打开 **Code** 页，新建一个会话，输入 `/dsh-delegate-kit setup`。
+   - **Codex 桌面端**：新建一个线程，输入 `$dsh-delegate-kit setup`。也可以先在侧边栏 **Skills** 里确认能看到 `dsh-delegate-kit`；看不到就重启 Codex。
+
+### 方法二：让桌面端的 Agent 代装
+
+在 Claude 桌面端的 Code 页或 Codex 桌面端新建会话，把下面这段发给它（需要本机装有 git）：
+
+```text
+请帮我安装 dsh-delegate-kit：如果 %USERPROFILE%\dsh-skills 不存在，就运行 git clone https://gitee.com/beilanya/dsh-skills.git "%USERPROFILE%\dsh-skills"；已存在就在该目录运行 git pull。然后在 %USERPROFILE%\dsh-skills\dsh-delegate-kit 目录运行 powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target both，把输出原样告诉我。不要做其他任何改动。
+```
+
+装完后**新开一个会话**，再输入 `/dsh-delegate-kit setup`（Claude）或 `$dsh-delegate-kit setup`（Codex）。只用其中一个宿主时，把提示词里的 `both` 改成 `claude` 或 `codex`。
+
+### 方法三：命令行
+
+在 PowerShell 里执行：
 
 ```powershell
 git clone https://gitee.com/beilanya/dsh-skills.git
 cd dsh-skills\dsh-delegate-kit
-```
-
-然后在 `dsh-delegate-kit` 目录执行：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target claude
-powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target codex
 powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target both
 ```
+
+`-Target` 按需选 `claude`、`codex` 或 `both`。没有 git 时，用方法一的 ZIP 解压后在 `dsh-delegate-kit` 目录执行最后一行即可。然后：
+
+- 命令行 Claude Code：运行 `claude`，输入 `/dsh-delegate-kit setup`；
+- 命令行 Codex：运行 `codex`，输入 `$dsh-delegate-kit setup`。
+
+`install.ps1` 的参数：
 
 | 参数 | 含义 |
 |---|---|
@@ -57,6 +88,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target both
 | `-Force` | 目标已存在时覆盖重装 |
 | `-WhatIf` | 只列出要复制或删除的文件，不改动磁盘 |
 | `-Uninstall` | 只删除带 `.kit-install.json` 的已安装 skill 目录 |
+| `-Interactive` | 菜单方式选择宿主，失败时询问是否覆盖重装（`install.cmd` 用的就是它） |
 
 安装前会先校验目标路径：两个宿主解析到同一个目录时直接拒绝（exit 1），不会覆盖；目标路径经联接点/符号链接解析后如果与包源目录重叠，也会拒绝，包源不会被删除或写入。
 
@@ -67,7 +99,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target both
 | Claude Code | `~\.claude\skills\dsh-delegate-kit` |
 | Codex | `$env:CODEX_HOME\skills\dsh-delegate-kit`；未设置 `CODEX_HOME` 时是 `~\.codex\skills\dsh-delegate-kit` |
 
-安装后，Claude Code 里说 `/dsh-delegate-kit setup`，Codex 里说 `$dsh-delegate-kit setup`；也可以用自然语言表达同样意思。Codex 没有 `/dsh-delegate-kit` 这样的斜杠命令。
+安装后，Claude Code 里说 `/dsh-delegate-kit setup`，Codex 里说 `$dsh-delegate-kit setup`；也可以用自然语言表达同样意思。Codex 没有 `/dsh-delegate-kit` 这样的斜杠命令。装好后已经打开的会话不一定能识别新 skill，新开一个会话最稳妥。
 
 ## 初始化：两段式 setup
 

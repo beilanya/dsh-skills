@@ -13,15 +13,18 @@
 以 dsh-delegate-kit 为例：
 
 1. 前置条件：已安装 Node.js 和 dsh（`npm i -g @deepseek-ai/dsh`），并已在 dsh 里配置好要当子代理的模型和 API Key（推荐运行 `dsh web`，在 Models 页面配置）。
-2. 获取代码并安装：
+2. 安装（三选一，详见 [dsh-delegate-kit/README.md](dsh-delegate-kit/README.md#安装)）：
+   - **图形化**：在本页点「克隆/下载」→「下载 ZIP」，解压后双击 `dsh-delegate-kit\install.cmd`，按提示选择装到 Claude、Codex 或两边。
+   - **让 Agent 代装**：在 Claude 桌面端的 Code 页或 Codex 桌面端，把 README 里「方法二」的提示词发给它。
+   - **命令行**：
 
-   ```powershell
-   git clone https://gitee.com/beilanya/dsh-skills.git
-   cd dsh-skills\dsh-delegate-kit
-   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target both
-   ```
+     ```powershell
+     git clone https://gitee.com/beilanya/dsh-skills.git
+     cd dsh-skills\dsh-delegate-kit
+     powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target both
+     ```
 
-   `-Target` 可以是 `claude`、`codex` 或 `both`。
+     `-Target` 可以是 `claude`、`codex` 或 `both`。
 
 3. 初始化：Claude Code 里说 `/dsh-delegate-kit setup`，Codex 里说 `$dsh-delegate-kit setup`，按提示选择模型、思考等级和权限。
 4. 查看全部指令：`/dsh-delegate-kit help`（Codex：`$dsh-delegate-kit help`）。
