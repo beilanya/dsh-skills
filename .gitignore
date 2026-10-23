@@ -1,0 +1,12 @@
+# 运行与测试产物
+.dsh-delegate-kit/
+__pycache__/
+*.pyc
+*.log
+
+# 本地 Agent 配置
+.claude/
+
+# 系统文件
+.DS_Store
+Thumbs.db
