@@ -34,82 +34,41 @@
 
 ## 安装
 
-四种方法任选一种，装完的结果完全一样。同一份安装同时适用于桌面端和命令行：
-
-- Claude 桌面端的 **Code** 页和命令行 `claude` 都读 `~\.claude\skills`；
-- Codex 桌面端和命令行 `codex` 都读 `~\.codex\skills`。
-
-> 不适用的通用入口：Claude 桌面端「设置」里上传 ZIP 的 Skills 是给 claude.ai 聊天用的，运行在云端，调用不了本机的 dsh；Codex 的 `$skill-installer` 只会原样复制仓库目录，不会按宿主选择 `SKILL.md`。这两种方式都装不了本 kit。
-
-### 方法一：图形化（下载 ZIP，双击安装）
-
-1. 浏览器打开 <https://gitee.com/beilanya/dsh-skills>，点「克隆/下载」→「下载 ZIP」（gitee 可能要求先登录），解压到任意目录。
-2. 进入解压出的 `dsh-delegate-kit` 文件夹，双击 **`install.cmd`**。
-   - 弹出「Windows 已保护你的电脑」时，点「更多信息」→「仍要运行」。也可以在解压前右键 ZIP →「属性」→ 勾选「解除锁定」。
-3. 在弹出的窗口里按提示输入数字后回车：`1` 只装 Claude Code，`2` 只装 Codex，`3` 两个都装。
-   - 已经装过别的版本时会询问是否覆盖，输入 `y` 回车即可。
-   - 看到「已安装 ...」后按任意键关闭窗口。
-4. 初始化：
-   - **Claude 桌面端**：打开 **Code** 页，新建一个会话，输入 `/dsh-delegate-kit setup`。
-   - **Codex 桌面端**：新建一个线程，输入 `$dsh-delegate-kit setup`。也可以先在侧边栏 **Skills** 里确认能看到 `dsh-delegate-kit`；看不到就重启 Codex。
-
-### 方法二：让桌面端的 Agent 代装
-
-在 Claude 桌面端的 Code 页或 Codex 桌面端新建会话，把下面这段发给它（需要本机装有 git）：
-
-```text
-请帮我安装 dsh-delegate-kit：如果 %USERPROFILE%\dsh-skills 不存在，就运行 git clone https://gitee.com/beilanya/dsh-skills.git "%USERPROFILE%\dsh-skills"；已存在就在该目录运行 git pull。然后在 %USERPROFILE%\dsh-skills\dsh-delegate-kit 目录运行 powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target both，把输出原样告诉我。不要做其他任何改动。
-```
-
-装完后**新开一个会话**，再输入 `/dsh-delegate-kit setup`（Claude）或 `$dsh-delegate-kit setup`（Codex）。只用其中一个宿主时，把提示词里的 `both` 改成 `claude` 或 `codex`。
-
-### 方法三：npx skills（Vercel skills 生态）
-
-GitHub 镜像 <https://github.com/beilanya/dsh-skills> 提供了一个安装器 skill，可以通过 [skills.sh](https://skills.sh) 的 CLI 安装：
+在 PowerShell 或终端里运行一条命令（需要 Node.js，`npx` 随 Node.js 一起安装）：
 
 ```powershell
-npx skills add beilanya/dsh-skills --skill dsh-delegate-kit-installer -g
+npx skills add beilanya/dsh-skills --skill dsh-delegate-kit -g
 ```
 
-装好后在 Claude Code 或 Codex 里新开会话，说“安装 dsh-delegate-kit”，Agent 会获取代码并运行本目录的 `install.ps1`。kit 本体不能用 `npx skills add` 直接安装：CLI 只复制 `SKILL.md` 所在的目录，而 kit 要按宿主选择 `SKILL.md` 并带上 `scripts\`。
+- 运行后会让你选择装给哪些 Agent：用方向键和空格勾选 **Claude Code** 和/或 **Codex**，回车确认；安装方式选默认的 symlink 即可。不想交互时可以直接指定：`npx skills add beilanya/dsh-skills --skill dsh-delegate-kit -g -a claude-code -a codex -y`。
+- 访问 GitHub 慢时可以改用 gitee：`npx skills add https://gitee.com/beilanya/dsh-skills.git --skill dsh-delegate-kit -g`。
+- `-g` 表示装到用户目录，所有项目都能用。不加 `-g` 就只装到当前项目。
 
-### 方法四：命令行
+装好后的位置（桌面端和命令行读同一个目录，装一次两边都能用）：
 
-在 PowerShell 里执行：
-
-```powershell
-git clone https://gitee.com/beilanya/dsh-skills.git
-cd dsh-skills\dsh-delegate-kit
-powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target both
-```
-
-`-Target` 按需选 `claude`、`codex` 或 `both`。没有 git 时，用方法一的 ZIP 解压后在 `dsh-delegate-kit` 目录执行最后一行即可。然后：
-
-- 命令行 Claude Code：运行 `claude`，输入 `/dsh-delegate-kit setup`；
-- 命令行 Codex：运行 `codex`，输入 `$dsh-delegate-kit setup`。
-
-`install.ps1` 的参数：
-
-| 参数 | 含义 |
+| 宿主 | 目录 |
 |---|---|
-| `-Target claude\|codex\|both` | 安装到哪个宿主，必填 |
-| `-ClaudeSkillsDir <目录>` | 覆盖 Claude 的 skills 根目录（默认 `~\.claude\skills`） |
-| `-CodexSkillsDir <目录>` | 覆盖 Codex 的 skills 根目录（默认 `$env:CODEX_HOME\skills` 或 `~\.codex\skills`） |
-| `-Force` | 目标已存在时覆盖重装 |
-| `-WhatIf` | 只列出要复制或删除的文件，不改动磁盘 |
-| `-Uninstall` | 只删除带 `.kit-install.json` 的已安装 skill 目录 |
-| `-Interactive` | 菜单方式选择宿主，失败时询问是否覆盖重装（`install.cmd` 用的就是它） |
+| Codex（桌面端、`codex` 命令行） | `~\.agents\skills\dsh-delegate-kit`（kit 的实际文件在这里） |
+| Claude Code（Claude 桌面端的 Code 页、`claude` 命令行） | `~\.claude\skills\dsh-delegate-kit`（指向上面目录的链接） |
 
-安装前会先校验目标路径：两个宿主解析到同一个目录时直接拒绝（exit 1），不会覆盖；目标路径经联接点/符号链接解析后如果与包源目录重叠，也会拒绝，包源不会被删除或写入。
+> 不适用的入口：Claude 桌面端「设置」里上传 ZIP 的 Skills 是给 claude.ai 聊天用的，运行在云端，调用不了本机的 dsh；Claude 桌面端的普通聊天页也不读本机 skills，要用 **Code** 页。
 
-安装位置：
+## 装好之后怎么配置
 
-| 宿主 | 默认目录 |
+新开一个会话（已打开的会话不一定能识别新装的 skill），按你用的客户端输入 setup：
+
+| 客户端 | 操作 |
 |---|---|
-| Claude Code | `~\.claude\skills\dsh-delegate-kit` |
-| Codex | `$env:CODEX_HOME\skills\dsh-delegate-kit`；未设置 `CODEX_HOME` 时是 `~\.codex\skills\dsh-delegate-kit` |
+| Claude 桌面端 | 打开 **Code** 页 → 新建会话 → 输入 `/dsh-delegate-kit setup` |
+| Claude Code 命令行 | 在任意目录运行 `claude` → 输入 `/dsh-delegate-kit setup` |
+| Codex 桌面端 | 新建线程 → 输入 `$dsh-delegate-kit setup`。侧边栏 **Skills** 里能看到 `dsh-delegate-kit`，看不到就重启 Codex |
+| Codex 命令行 | 运行 `codex` → 输入 `$dsh-delegate-kit setup` |
 
-安装后，Claude Code 里说 `/dsh-delegate-kit setup`，Codex 里说 `$dsh-delegate-kit setup`；也可以用自然语言表达同样意思。Codex 没有 `/dsh-delegate-kit` 这样的斜杠命令。装好后已经打开的会话不一定能识别新 skill，新开一个会话最稳妥。
+Codex 用 `$` 点名 skill，没有 `/dsh-delegate-kit` 这样的斜杠命令；也可以用自然语言，例如“配置一下 dsh-delegate-kit”。
+
+setup 会在对话里问你三件事：用哪个模型、思考等级（推荐 auto，由主 Agent 按任务选）、默认权限；最后询问是否把委派规则写进全局配置（`CLAUDE.md` / `AGENTS.md`）。同意写入后，主 Agent 就会自动判断哪些活交给 dsh，平时不用再下任何指令。
+
+**两个宿主都用时**：模型、思考等级、权限这些配置两边共用，只需要在其中一个里 setup 一次。全局规则则是每个宿主各写一份：在另一个宿主里说 `/dsh-delegate-kit rules`（Codex：`$dsh-delegate-kit rules`），确认后写入即可，不用重新选模型。
 
 ## 初始化：两段式 setup
 
@@ -165,9 +124,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "<skill目录>\scripts\kit.p
 | `status` | 显示当前模型、思考模式、默认权限和可选功能 | 无 |
 | `stats` | 按 `index.jsonl` 统计效率 | `-Days <天数>`（不能为负数） |
 | `diag` | 生成脱敏诊断包 | 无 |
-| `update` | 检查 gitee 上的新版 kit；`-Apply` 时重装到本机所有已安装的副本并自检 | `-Apply`、`-Force` |
+| `update` | 查询新版 kit 和更新内容；`-Apply` 时运行 `npx skills update` 更新并自检 | `-Apply`、`-Force` |
 | `rules` | 展示或追加全局规则段落 | `-Host claude\|codex`、`-Show`、`-Apply`、`-RulesFile <路径>` |
-| `uninstall` | 移除规则段落和 kit 数据 | `-Host claude\|codex\|all`、`-RemoveSkills`、`-PurgeLogs`、`-RulesFile <路径>`、`-ClaudeSkillsDir <目录>`、`-CodexSkillsDir <目录>` |
+| `uninstall` | 移除规则段落和 kit 数据 | `-Host claude\|codex\|all`、`-PurgeLogs`、`-RulesFile <路径>`；skill 文件用 `npx skills remove dsh-delegate-kit -g` 删除 |
 
 ## 权限
 
@@ -246,7 +205,7 @@ check 只验证配置、不调用模型，所以 dsh 输出格式的变化要到
 
 1. **什么都不做也能用**：派发失败时主 Agent 会自动改用宿主自带方式（Claude Code 用子 Agent，Codex 自己做）完成当前任务，并告诉你原因。
 2. **运行 `repair`**（Claude：`/dsh-delegate-kit repair`，Codex：`$dsh-delegate-kit repair`）：插件 id、补丁格式、思考档写法变化这类配置层问题大多能自动修好。提示插件未对齐时，按主 Agent 的提问同意安装即可。提示模型或思考档不再支持时，重新运行 `setup` 选择。
-3. **运行 `update`**：repair 修不好，或提示 `FORMAT: output` 时，说明需要新版 kit。`update` 会从 gitee 检查新版并列出更新内容，你确认后自动重装到 Claude 和 Codex 两边并自检；完成后开一个新会话即可。
+3. **运行 `update`**：repair 修不好，或提示 `FORMAT: output` 时，说明需要新版 kit。`update` 会检查新版并列出更新内容，你确认后通过 `npx skills update` 更新（Claude 和 Codex 共用一份，一次更新两边）并自检；完成后新开一个会话即可。
 4. **回退 dsh**：还没有适配的新版 kit 时，把 dsh 装回兼容表里的版本，下次派发会自动自检并恢复：
 
    ```powershell
@@ -259,38 +218,43 @@ check 只验证配置、不调用模型，所以 dsh 输出格式的变化要到
 
 ## 更新 kit
 
-- 推荐：在对话框里说 `/dsh-delegate-kit update`（Codex：`$dsh-delegate-kit update`）。需要本机装有 git；只拉取到 `KIT_HOME\update\` 下的临时目录比对，用完即删，确认后才重装。
-- 手动：重新 `git clone`（或在原来的克隆目录里 `git pull`），再在 `dsh-delegate-kit` 目录运行 `install.ps1 -Target both -Force`（只装了一边时换成 `claude` 或 `codex`）。
-- 更新只替换 skill 文件，不动 `KIT_HOME` 里的配置和日志，也不需要重新 setup；更新后会自动跑一次 `check`，不通过时自动 `repair`。
+- 推荐：在对话框里说 `/dsh-delegate-kit update`（Codex：`$dsh-delegate-kit update`）。它先列出最新版本和更新内容（查询需要 git，只浅克隆到 `KIT_HOME\update\` 下的临时目录，用完即删），你确认后运行 `npx skills update dsh-delegate-kit -g`，再自动跑一次 `check`，不通过时自动 `repair`。
+- 手动：直接运行 `npx skills update dsh-delegate-kit -g`。
+- 更新只替换 skill 文件，不动 `KIT_HOME` 里的配置和日志，也不需要重新 setup。
+- 0.3.0 以前用 `install.ps1` 安装的副本（目录里有 `.kit-install.json`）不能用 npx 更新：先删除 `~\.claude\skills\dsh-delegate-kit` 和 `~\.codex\skills\dsh-delegate-kit`，再按「安装」一节用 npx 重装，配置保留，不用重新 setup。
 
 ## 卸载
 
-在 Claude Code 里说 `/dsh-delegate-kit uninstall`，在 Codex 里说 `$dsh-delegate-kit uninstall`。实际执行：
+分两步：先在对话框里清理规则和数据，再删 skill 文件。
 
-```powershell
-# 不传 -Host 时等价于 -Host all：移除两个宿主的规则段落，并删除 kit 生成的补丁和状态
-kit.ps1 uninstall
+1. 在 Claude Code 里说 `/dsh-delegate-kit uninstall`，在 Codex 里说 `$dsh-delegate-kit uninstall`。实际执行：
 
-# 只处理一个宿主：只移除该宿主的规则段落，不清理 kit 的 patches/state/spec/check
-kit.ps1 uninstall -Host claude
-kit.ps1 uninstall -Host codex
+   ```powershell
+   # 不传 -Host 时等价于 -Host all：移除两个宿主的规则段落，并删除 kit 生成的补丁和状态
+   kit.ps1 uninstall
 
-# 可选：同时删除已安装的 skill 文件 / 删除日志
-kit.ps1 uninstall -Host all -RemoveSkills -PurgeLogs
+   # 只处理一个宿主：只移除该宿主的规则段落，不清理 kit 的 patches/state/spec/check
+   kit.ps1 uninstall -Host claude
+   kit.ps1 uninstall -Host codex
 
-# 自定义 skills 根目录；参数名与 install.ps1 相同
-kit.ps1 uninstall -Host all -RemoveSkills -ClaudeSkillsDir 'D:\skills' -CodexSkillsDir 'D:\skills-codex'
-```
+   # 可选：同时删除日志
+   kit.ps1 uninstall -Host all -PurgeLogs
+   ```
+
+2. 删除 skill 文件：
+
+   ```powershell
+   npx skills remove dsh-delegate-kit -g
+   ```
 
 - 只传 `-Host claude` 或 `-Host codex` 时，只移除该宿主的规则段落；补丁、`state.json`、`spec.json`、`check\` 不做清理。`rules.json` 只移除该宿主的记录，若因此为空则删除该文件。
 - 不传 `-Host`（即 all）时，先移除两个宿主的规则段落，再删除 `patches\`、`state.json`、`spec.json`、`check\`、`rules.json`；`logs\` 默认保留，`-PurgeLogs` 才删除（含 `logs\codex\`）。
 - 规则段落用标记定位，`uninstall` 会原样移除；移除前会备份到 `backups\`。规则文件必须是 UTF-8（带 BOM 也可以）；GBK、UTF-16 等编码会被拒绝并提示先转码，文件不会被修改。
 - **清理前会校验 KIT_HOME 归属**：`state.json` 必须可解析、`schemaVersion` 为 1 且有 `kitVersion`，且 `patches` 不能等于 `DSH_HOME\patches`、`KIT_HOME` 不能等于 `DSH_HOME`；不满足时拒绝清理。
 - 任一规则段落移除失败（含状态为警告）时，**不做任何清理**并返回 1，`state.json` 和补丁都保留。
-- `-RemoveSkills` 只删除带 `.kit-install.json` 的 `dsh-delegate-kit` 目录；可用 `-ClaudeSkillsDir` / `-CodexSkillsDir` 指定根目录（与 `install.ps1` 同名参数对应），也会识别 kit 自身所在的安装目录。
 - 如果规则文件是 kit 自己创建的（原文件不存在），移除段落且内容为空后会被删除。
 - `backups\` 永远保留。
-- 也可以只删 skill 文件：`install.ps1 -Uninstall -Target claude|codex|both`。它不处理 `CLAUDE.md` / `AGENTS.md`，也不删除 `KIT_HOME`。
+- `npx skills remove` 只删 skill 文件，不处理 `CLAUDE.md` / `AGENTS.md`，也不删除 `KIT_HOME`，所以先做第 1 步。`kit.ps1 uninstall -RemoveSkills` 只用于删除 0.3.0 以前用 `install.ps1` 装的旧副本。
 
 ## 常见问题
 

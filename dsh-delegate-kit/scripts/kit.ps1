@@ -16,7 +16,7 @@ kit.ps1 — dsh-delegate-kit 入口。用法：
                              展示 / 追加全局规则段落（追加前备份）
   uninstall [-Host claude|codex|all] [-RulesFile <路径>] [-RemoveSkills] [-PurgeLogs]
             [-ClaudeSkillsDir <目录>] [-CodexSkillsDir <目录>]
-  update [-Apply] [-Force]    检查 gitee 上的新版 kit；-Apply 时重装到已安装的目录并自检。
+  update [-Apply] [-Force]    查询新版 kit；-Apply 时运行 npx skills update 更新并自检。
 -Json：stdout 只输出一个 JSON 对象，提示写 stderr。
 环境变量：DSH_HOME（默认 ~\.dsh）、DSH_KIT_HOME（默认 <DSH_HOME>\dsh-delegate-kit）。
 #>

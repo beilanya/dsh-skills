@@ -5,7 +5,7 @@ description: 把执行类工作委派给命令行版 dsh（dsh headless，模型
 
 # dsh-delegate-kit：Codex 规划审核，dsh 执行
 
-分工：主 Agent 负责澄清需求、定方案、拆分、写任务单、diff 审核和最终验收；dsh 负责执行。下文用 `$KIT` 指代本 Skill 的 `scripts` 目录：`$env:CODEX_HOME\skills\dsh-delegate-kit\scripts`，CODEX_HOME 未设置时是 `$HOME\.codex\skills\dsh-delegate-kit\scripts`。命令都在 PowerShell 里运行。
+分工：主 Agent 负责澄清需求、定方案、拆分、写任务单、diff 审核和最终验收；dsh 负责执行。下文用 `$KIT` 指代本 Skill 目录（SKILL.md 所在目录）下的 `scripts` 目录，写命令时替换成实际的绝对路径：用 `npx skills add -g` 安装时是 `$HOME\.agents\skills\dsh-delegate-kit\scripts`。命令都在 PowerShell 里运行。
 
 当前配置（模型、支持的思考档、思考模式、默认权限、可选功能是否可用）以 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$KIT\kit.ps1" status` 的输出为准。不要凭记忆写模型名或档位。
 
@@ -36,14 +36,15 @@ Codex 里用 `$dsh-delegate-kit <子命令>` 点名（也可以在 `/skills` 里
 
 ### 其他子命令
 
+- `rules`：只做 setup 的第 7 步（展示并在用户同意后追加全局规则），不重新选模型。用于已在 Claude Code 里 setup 过、现在要让 Codex 也自动委派的情况。
 - `check`：自检（dsh 版本对比基线、补丁能否解析、必需插件是否都在、模型是否仍支持所选思考档、可选功能状态）。不调模型。
 - `repair`：按当前 dsh 版本重新识别插件 id、按当前模型目录重新生成补丁，再跑 check。需要对齐插件版本时，先把安装命令给用户看，同意后加 `-InstallPlugins` 重跑。
 - `stats [-Days 30]`：按 index 统计效率。用户问效率或要调默认思考档时用它，不凭印象。
 - `diag`：生成诊断包（版本、check 输出、日志末尾、状态文件，不含 Key），报告路径。
-- `update`：检查新版 kit。用户说 `$dsh-delegate-kit update` 或“更新 kit”就视为同意联网查询，运行 `kit.ps1 update`（从 gitee 拉取到临时目录比对，不改动已安装文件），把当前版本、最新版本、更新内容、新版是否验证过本机 dsh 版本告诉用户。有新版时问用户是否更新，同意后运行 `kit.ps1 update -Apply`：重装到本机所有已安装的副本（Claude 和 Codex 一起），再自动 check（失败时自动 repair）。完成后提醒用户开新会话（桌面端可能需要重启）才会加载新的 SKILL.md。找不到 git 或拉取失败时，转述输出里的手动更新步骤。
+- `update`：更新 kit。用户说 `$dsh-delegate-kit update` 或“更新 kit”就视为同意联网查询，运行 `kit.ps1 update`（只把仓库浅克隆到临时目录比对版本，不改动已安装文件），把当前版本、最新版本、更新内容、新版是否验证过本机 dsh 版本告诉用户。有新版时问用户是否更新，同意后运行 `kit.ps1 update -Apply`：它调用 `npx skills update dsh-delegate-kit -g`（Claude 和 Codex 共用同一份，一次更新两边），再自动 check（失败时自动 repair）。完成后提醒用户新开会话才会加载新的 SKILL.md。输出提示当前副本是旧安装脚本装的（目录里有 `.kit-install.json`）时，把迁移步骤转述给用户，不要自己删除目录。
 - `uninstall`：先说明会做什么，用户同意后执行。
   - `kit.ps1 uninstall -Host codex`：只移除 AGENTS.md 里的规则段落（先备份），保留补丁、状态和日志（Claude 可能还在用）。
-  - `kit.ps1 uninstall`（不传 -Host，等于 all）：移除两边的规则段落，并删除 kit 生成的补丁、状态等数据；加 `-RemoveSkills` 才删 Skill 文件，加 `-PurgeLogs` 才删日志（这两项只在 all 时生效）；备份目录始终保留。
+  - `kit.ps1 uninstall`（不传 -Host，等于 all）：移除两边的规则段落，并删除 kit 生成的补丁、状态等数据；加 `-PurgeLogs` 才删日志（只在 all 时生效）；备份目录始终保留。Skill 文件本身用 `npx skills remove dsh-delegate-kit -g` 删除。
 
 ## 1. 写任务单
 

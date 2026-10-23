@@ -29,9 +29,9 @@
 | `repair` | dsh 升级或自检失败后修复：重新识别插件、按当前模型目录重新生成补丁、再自检 | `-InstallPlugins`：把 headless 插件版本对齐到 dsh（先征求你同意） |
 | `stats` | 委派效率统计（按思考档、是否挂浏览器分组：次数、耗时、步数、工具调用、token） | `-Days <n>`：只看最近 n 天 |
 | `diag` | 生成诊断包 zip（版本、自检结果、日志末尾、状态文件；已脱敏，不含任何 Key） | — |
-| `update` | 检查 gitee 上的新版 kit：显示当前版本、最新版本、更新内容（只拉到临时目录比对，不改动已安装文件） | `-Apply`：确认后重装到本机所有已安装的副本（Claude、Codex 一起），再自检；`-Force`：没有新版也重装 |
+| `update` | 查询新版 kit：显示当前版本、最新版本、更新内容（只拉到临时目录比对，不改动已安装文件） | `-Apply`：确认后运行 `npx skills update dsh-delegate-kit -g`（Claude、Codex 共用一份），再自检；`-Force`：没有新版也更新 |
 | `rules` | 查看或追加全局规则段落（让主 Agent 主动委派） | `-Host claude\|codex`；`-Show` 只看；`-Apply` 追加（会先备份）；`-RulesFile <路径>` 指定文件 |
-| `uninstall` | 卸载 | `-Host claude\|codex` 只移除该宿主的规则段落；不传 `-Host` 时移除两边规则并删除补丁和状态；`-RemoveSkills` 删 Skill 文件；`-PurgeLogs` 删日志；`-ClaudeSkillsDir`/`-CodexSkillsDir` 指定自定义安装目录 |
+| `uninstall` | 卸载 | `-Host claude\|codex` 只移除该宿主的规则段落；不传 `-Host` 时移除两边规则并删除补丁和状态；`-PurgeLogs` 删日志。之后用 `npx skills remove dsh-delegate-kit -g` 删除 Skill 文件 |
 
 所有子命令都支持 `-Json`（输出机器可读的 JSON）。
 
@@ -78,7 +78,7 @@ Claude 用 `scripts\dsh-run.ps1`，Codex 用 `scripts\dsh-dispatch.ps1`，参数
 | 位置 | 内容 |
 |---|---|
 | `~\.dsh\dsh-delegate-kit\` | kit 数据：`state.json`、`patches\`、`logs\`（Codex 在 `logs\codex\`）、`backups\`、`diag\` |
-| `~\.claude\skills\dsh-delegate-kit\`、`~\.codex\skills\dsh-delegate-kit\` | Skill 文件 |
+| `~\.agents\skills\dsh-delegate-kit\`（Codex 读这里）、`~\.claude\skills\dsh-delegate-kit\`（Claude Code 读这里，是指向前者的链接） | Skill 文件（`npx skills add -g` 安装） |
 | 环境变量 `DSH_KIT_HOME` | 改 kit 数据目录（测试时常用） |
 
 更多说明见 Skill 目录下的 `README.md`，排障见 `docs\MAINTENANCE.md`。

@@ -2,19 +2,18 @@
 
 本文件说明这个包的组成、运行时数据、已核实的关键事实、兼容与升级机制、排障步骤和回归清单。改动脚本或 dsh 升级后，先读本文件，再按第 6 节回归。
 
-当前版本：`0.2.0`（2026-10-23）。
+当前版本：`0.3.0`（2026-10-23）。
 
 ## 1. 组成文件
 
-包内文件与安装后的关系：`install.ps1` 把 `claude\SKILL.md` 或 `codex\SKILL.md` 安装为 `<skill目录>\SKILL.md`，同时复制 `scripts\`、`templates\`、`docs\MAINTENANCE.md`、`README.md`，并写入 `.kit-install.json` 作为安装标记。
+安装方式：用户运行 `npx skills add beilanya/dsh-skills --skill dsh-delegate-kit -g`。skills CLI 在仓库里找不到标准位置（根目录、`skills\`、`.claude\skills\` 等）的 skill 时会递归搜索，找到 `dsh-delegate-kit\SKILL.md`，把整个 `dsh-delegate-kit\` 目录复制到 `~\.agents\skills\dsh-delegate-kit`（Codex 读这里），并为 Claude Code 在 `~\.claude\skills\dsh-delegate-kit` 建链接（`--copy` 时为副本）。所以仓库根目录和 `skills\` 下都不要再放其他 `SKILL.md`，否则递归搜索不会发生；`hosts\` 下的文件也不能叫 `SKILL.md`。
 
 | 文件 | 作用 | 编码 |
 |---|---|---|
-| `README.md` | 面向第一次安装的用户：前置条件、安装、setup、子命令、权限、兼容性、卸载、常见问题 | UTF-8 无 BOM |
-| `install.ps1` | 安装、覆盖、`-WhatIf` 预览、`-Uninstall` 卸载、`-Interactive` 菜单模式；只操作叶子名为 `dsh-delegate-kit` 的目录 | UTF-8 **带 BOM** |
-| `install.cmd` | 双击安装入口，只调用 `install.ps1 -Interactive`；内容保持纯 ASCII（`chcp 65001` 后 `set /p` 读不到输入，所以中文提示都放在 PowerShell 里） | ASCII，CRLF |
-| `claude\SKILL.md` | Claude Code 侧的 setup/派发/审核/续接流程和提示格式 | UTF-8 无 BOM |
-| `codex\SKILL.md` | Codex 侧的 setup/dispatch/回调/审核/续接流程 | UTF-8 无 BOM |
+| `SKILL.md` | 通用入口：判断宿主后读 `hosts\` 下对应文件执行 | UTF-8 无 BOM |
+| `hosts\claude-code.md` | Claude Code 侧的 setup/派发/审核/续接流程和提示格式。不能叫 `claude.md`：Windows 不区分大小写，会被 Claude Code 当成 `CLAUDE.md` 记忆文件自动加载 | UTF-8 无 BOM |
+| `hosts\codex.md` | Codex 侧的 setup/dispatch/回调/审核/续接流程 | UTF-8 无 BOM |
+| `README.md` | 面向第一次安装的用户：前置条件、安装、配置、子命令、权限、兼容性、卸载、常见问题 | UTF-8 无 BOM |
 | `scripts\kit.ps1` | 子命令入口：setup、check、repair、status、stats、diag、rules、uninstall、update、help | UTF-8 **带 BOM** |
 | `scripts\dsh-run.ps1` | 执行器：预检、拼补丁、启动 `dsh headless --json`、解析事件、写摘要和 index；自包含，不 dot-source `common.ps1` | UTF-8 **带 BOM** |
 | `scripts\dsh-dispatch.ps1` | Codex 专用：隐藏启动独立 worker，worker 调 `dsh-run.ps1`，完成后用 `codex queue` 回调 | UTF-8 **带 BOM** |
@@ -58,14 +57,14 @@
 
 `uninstall`（不传 `-Host`，即 all）会删除 `patches\`、`state.json`、`rules.json`、`spec.json`、`check\`；`logs\` 只在 `-PurgeLogs` 时删除；`backups\` 始终保留。只传 `-Host claude|codex` 时只移除该宿主的规则段落，`patches\`、`state.json`、`spec.json`、`check\` 都不删；`rules.json` 会移除该宿主的记录，记录为空时删除文件。
 
-`-RemoveSkills` 只删除带 `.kit-install.json` 的 `dsh-delegate-kit` 目录；可用 `-ClaudeSkillsDir` / `-CodexSkillsDir` 指定 skills 根目录（与 `install.ps1` 同名参数），也会把 kit 自身所在且 host 匹配的安装目录作为候选。规则文件原本不存在、由 kit 创建时，移除段落后内容为空会删除该文件。任一规则段落移除失败（warn/failed）时跳过全部清理并返回 1。
+skill 文件用 `npx skills remove dsh-delegate-kit -g` 删除。`-RemoveSkills` 只为 0.3.0 以前 `install.ps1` 装的旧副本保留：只删除带 `.kit-install.json` 的 `dsh-delegate-kit` 目录，可用 `-ClaudeSkillsDir` / `-CodexSkillsDir` 指定 skills 根目录；没有标记的目录会拒绝并提示改用 `npx skills remove`。规则文件原本不存在、由 kit 创建时，移除段落后内容为空会删除该文件。任一规则段落移除失败（warn/failed）时跳过全部清理并返回 1。
 
 ### state.json 主要字段
 
 | 字段 | 含义 |
 |---|---|
 | `schemaVersion` | 状态结构版本，当前为 1 |
-| `kitVersion` | 最近一次 setup 或通过的 `check -UpdateBaseline` 所用的 kit 版本，当前 `0.2.0` |
+| `kitVersion` | 最近一次 setup 或通过的 `check -UpdateBaseline` 所用的 kit 版本，当前 `0.3.0` |
 | `createdAt` / `updatedAt` | 创建/最后更新时间（ISO 8601） |
 | `dshHome` | 使用的 DSH_HOME |
 | `dshVersion` | 基线 dsh 版本；派发前预检用它比对 |
@@ -299,18 +298,17 @@ console.log((text.match(/compaction\/start/g) || []).length);
 
 ### update 做什么
 
-- 需要 git。从 `kit-meta.json` 的 `updateSource`（可用环境变量 `DSH_KIT_UPDATE_SOURCE` 覆盖，测试时指向本地仓库）浅克隆 `updateBranch` 到 `KIT_HOME\update\<时间戳>`，结束时删除。
-- 从新包 `install.ps1` 读版本号，与当前包版本比较；更新内容取新包本文件第 7 节里比当前版本新的条目。
-- 已安装副本：对 claude、codex 分别按 `Get-KitSkillTarget` 的规则（参数 → `DSH_KIT_CLAUDE_SKILLS_DIR` / `DSH_KIT_CODEX_SKILLS_DIR` → kit 自身目录 → 默认目录）找目录，带有效 `.kit-install.json` 且 host 匹配的才算。
-- 不带 `-Apply` 只报告；带 `-Apply` 时对每个副本运行新包的 `install.ps1 -Target <host> -<Host>SkillsDir <根目录> -Force`，然后用新装的 `kit.ps1` 跑 `check -Json -UpdateBaseline`，不通过再跑 `repair`。没有 state 时跳过自检。
+- 查询（需要 git，没有 git 时跳过查询）：从 `kit-meta.json` 的 `updateSource`（可用环境变量 `DSH_KIT_UPDATE_SOURCE` 覆盖，测试时指向本地仓库）浅克隆 `updateBranch` 到 `KIT_HOME\update\<时间戳>`，结束时删除。从新包 `scripts\lib\common.ps1` 读版本号（旧包退回 `install.ps1`），与当前版本比较；更新内容取新包本文件第 7 节里比当前版本新的条目。
+- 不带 `-Apply` 只报告；带 `-Apply` 时运行 `cmd /c npx -y skills update dsh-delegate-kit -g -y`（Claude、Codex 共用 `~\.agents\skills` 里的一份），再用更新后的 `kit.ps1` 跑 `check -Json -UpdateBaseline`，不通过再跑 `repair`。没有 state 时跳过自检。
+- 当前副本目录里有 `.kit-install.json`（0.3.0 以前 `install.ps1` 装的旧副本）时，`-Apply` 拒绝并给出迁移步骤：删除旧目录，再用 `npx skills add` 重装。不自动删除。
 - 不动 `KIT_HOME` 里的配置和日志；新 SKILL.md 需要宿主开新会话才会加载。
 
 ### 发布新版本（维护者）
 
 1. dsh 发布新版后，在本机升级 dsh，按第 6 节回归。
 2. 需要改代码时修改并回归；无论是否改代码，把验证通过的 dsh 版本加入 `kit-meta.json` 的 `testedDshVersions`，必要时更新 `recommendedDshVersion`，同时更新 README 的兼容表。
-3. 改了代码就同时改 `install.ps1` 和 `scripts\lib\common.ps1` 里的 `$script:KitVersion`，在第 7 节加一行变更记录（格式 `- x.y.z（日期）：说明`，update 靠它展示更新内容）。
-4. 推送到 gitee 的 `main` 分支，用户运行 `update` 即可拿到。
+3. 改了代码就改 `scripts\lib\common.ps1` 里的 `$script:KitVersion`，在第 7 节加一行变更记录（格式 `- x.y.z（日期）：说明`，update 靠它展示更新内容）。
+4. 推送 `main`（本仓库的 `origin` 同时推 gitee 和 GitHub）。用户运行 `update` 或 `npx skills update dsh-delegate-kit -g` 即可拿到；npx 从 GitHub 拉取，所以两边都要推到。
 
 ### 功能分级
 
@@ -319,14 +317,6 @@ console.log((text.match(/compaction\/start/g) || []).length);
 | 必需 | 凭证插件、所选模型服务商配置、默认模型 | 对应 `check` 不通过；报 `MISSING_CREDENTIAL` 或模型配置错误 |
 | 可选 | 浏览器、电脑操作 | 对应 `features.*.available=false`；带参数派发返回 `FEATURE: ...` |
 | 可选调优 | 压缩参数 | 不写压缩条目，使用 dsh 默认值；不影响派发 |
-
-### 安装路径校验
-
-`install.ps1` 在动磁盘前校验所有目标：
-
-- 多个 host 解析到同一目标目录（规范化后忽略大小写比较）→ 报错并 exit 1，不进入安装。
-- `Assert-SafeTarget` 先用 `Resolve-RealPath` 逐级解析目标与包源的真实路径（跟随 junction/symlink，处理相对目标和 `\\?\` 前缀），再做叶子名与重叠检查；目标经联接点解析后与包源重叠、路径组件是文件、层级过深或无法解析时一律拒绝，exit 1。
-- 安装仍使用原字面目标路径，解析只用于校验。
 
 ## 5. 故障排查
 
@@ -632,3 +622,4 @@ Test-Path (Join-Path $env:DSH_KIT_HOME 'patches')        # True：拒绝清理�
 
 - 0.1.0（2026-10-23）：首个版本。
 - 0.2.0（2026-10-23）：dsh 输出格式无法识别时返回 `DSH_INCOMPATIBLE` + `FORMAT: output`，不再误判为 FAILED；dsh 版本未经验证时在 check、status 和派发摘要里警告并给出回退命令；新增 `update` 子命令，从 gitee 检查并安装新版 kit；README 增加「dsh 升级后失效怎么办」。
+- 0.3.0（2026-10-23）：改为统一用 `npx skills add beilanya/dsh-skills --skill dsh-delegate-kit -g` 安装，装好后直接 setup；删除 `install.ps1` / `install.cmd` 和安装器 skill；新增通用入口 `SKILL.md`，宿主说明移到 `hosts\`；`update` 改为调用 `npx skills update`；旧方式安装的副本需要按 README 迁移一次。
