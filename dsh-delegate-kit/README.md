@@ -34,7 +34,7 @@
 
 ## 安装
 
-三种方法任选一种，装完的结果完全一样。同一份安装同时适用于桌面端和命令行：
+四种方法任选一种，装完的结果完全一样。同一份安装同时适用于桌面端和命令行：
 
 - Claude 桌面端的 **Code** 页和命令行 `claude` 都读 `~\.claude\skills`；
 - Codex 桌面端和命令行 `codex` 都读 `~\.codex\skills`。
@@ -63,7 +63,17 @@
 
 装完后**新开一个会话**，再输入 `/dsh-delegate-kit setup`（Claude）或 `$dsh-delegate-kit setup`（Codex）。只用其中一个宿主时，把提示词里的 `both` 改成 `claude` 或 `codex`。
 
-### 方法三：命令行
+### 方法三：npx skills（Vercel skills 生态）
+
+GitHub 镜像 <https://github.com/beilanya/dsh-skills> 提供了一个安装器 skill，可以通过 [skills.sh](https://skills.sh) 的 CLI 安装：
+
+```powershell
+npx skills add beilanya/dsh-skills --skill dsh-delegate-kit-installer -g
+```
+
+装好后在 Claude Code 或 Codex 里新开会话，说“安装 dsh-delegate-kit”，Agent 会获取代码并运行本目录的 `install.ps1`。kit 本体不能用 `npx skills add` 直接安装：CLI 只复制 `SKILL.md` 所在的目录，而 kit 要按宿主选择 `SKILL.md` 并带上 `scripts\`。
+
+### 方法四：命令行
 
 在 PowerShell 里执行：
 
