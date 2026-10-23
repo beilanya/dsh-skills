@@ -12,7 +12,7 @@ dsh-run.ps1 — 把任务交给 dsh headless 执行，输出精简摘要（dsh-d
   FAILED             参数错误（exit 2）或其他失败（exit 1）
   DSH_UNAVAILABLE    dsh / node / state.json 不可用
   TIMEOUT            超时，已尝试终止本次拥有的进程树
-  DSH_INCOMPATIBLE   state 与当前环境不兼容，预检未通过
+  DSH_INCOMPATIBLE   state 与当前环境不兼容，预检未通过；或 dsh 输出格式无法识别（带 FORMAT: output）
 
 运行产物默认在 LogDir（KIT_HOME\logs）下：
   <prefix>.task.md / .jsonl / .err.log / .progress.md / .running / .extend
@@ -245,7 +245,7 @@ function Read-DshEvents([string]$text, [string]$fallbackSessionId) {
   # 容忍缺字段、坏行和不完整尾行：对应统计计 0 或 null，绝不抛出。
   $result = [ordered]@{
     sid = $fallbackSessionId; final = $null; reason = $null
-    toolCalls = 0; steps = 0; thinkChars = 0
+    toolCalls = 0; steps = 0; thinkChars = 0; known = 0
     inTok = [int64]0; outTok = [int64]0; cacheTok = [int64]0
     toolErrors = @(); errors = @()
   }
@@ -258,6 +258,9 @@ function Read-DshEvents([string]$text, [string]$fallbackSessionId) {
       if ($null -eq $e) { continue }
       $type = $null
       try { $type = [string]$e.type } catch { $type = $null }
+      if ($type -in @('session', 'tool_call', 'thinking', 'tool_result', 'status', 'error', 'final')) {
+        $result.known = [int]$result.known + 1
+      }
       switch ($type) {
         'session' {
           try { if ($e.sessionId) { $result.sid = [string]$e.sessionId } } catch { }
@@ -313,6 +316,70 @@ function Read-DshEvents([string]$text, [string]$fallbackSessionId) {
     } catch { continue }
   }
   return $result
+}
+
+function Resolve-RunStatus {
+  # 严格状态判定：只有 exit=0 + turn_end=completed + final 才算 OK。
+  # DSH_INCOMPATIBLE 表示进程正常退出但识别不到 turn_end，输出格式可能已变化。
+  param(
+    [bool]$timedOut,
+    [string]$startFailure,
+    [int]$exitCode,
+    [string]$reason,
+    [string]$final,
+    [int]$knownEvents,
+    [string]$errBlob
+  )
+  $r = [ordered]@{ status = 'FAILED'; formatUnknown = $false }
+  $unavailablePattern = 'MISSING_CREDENTIAL|Unauthorized|\b401\b|\b402\b|\b403\b|insufficient|quota|balance|subscription|payment|invalid api key|api key'
+  if ($timedOut) {
+    $r.status = 'TIMEOUT'
+  } elseif (-not [string]::IsNullOrEmpty($startFailure)) {
+    $r.status = 'FAILED'
+  } elseif ($exitCode -eq 0 -and $reason -eq 'completed' -and -not [string]::IsNullOrEmpty($final)) {
+    $r.status = 'OK'
+  } elseif ($errBlob -match $unavailablePattern) {
+    $r.status = 'DSH_UNAVAILABLE'
+  } elseif ($exitCode -eq 0 -and ($knownEvents -eq 0 -or [string]::IsNullOrEmpty($reason))) {
+    $r.status = 'DSH_INCOMPATIBLE'
+    $r.formatUnknown = $true
+  } else {
+    $r.status = 'FAILED'
+  }
+  return $r
+}
+
+function Get-KitRunTestedInfo([string]$version) {
+  # 独立读取 lib\kit-meta.json（dsh-run 不 dot-source common.ps1）；读不到就跳过，不影响派发。
+  $r = [ordered]@{
+    version = $version; tested = $false; testedList = @()
+    recommended = ''; rollback = ''; message = ''
+  }
+  $meta = $null
+  try {
+    $metaPath = Join-Path $PSScriptRoot 'lib\kit-meta.json'
+    if (Test-Path -LiteralPath $metaPath -PathType Leaf) {
+      $metaUtf8 = New-Object System.Text.UTF8Encoding($false)
+      $raw = [IO.File]::ReadAllText($metaPath, $metaUtf8)
+      if ($raw.Length -gt 0 -and $raw[0] -eq [char]0xFEFF) { $raw = $raw.Substring(1) }
+      if ($raw.Trim()) { $meta = $raw | ConvertFrom-Json }
+    }
+  } catch { $meta = $null }
+  if ($null -eq $meta) { return $r }
+  $tested = @()
+  try {
+    if ($null -ne $meta.testedDshVersions) { $tested = @($meta.testedDshVersions | ForEach-Object { [string]$_ }) }
+  } catch { $tested = @() }
+  $r.testedList = $tested
+  try { $r.recommended = [string]$meta.recommendedDshVersion } catch { $r.recommended = '' }
+  if ($r.recommended) { $r.rollback = 'npm i -g @deepseek-ai/dsh@' + $r.recommended }
+  $r.tested = [bool]($version -and ($tested -contains $version))
+  if ($version -and -not $r.tested -and $tested.Count -gt 0) {
+    $msg = 'dsh ' + $version + ' 未经本 kit 验证（已验证：' + ($tested -join '、') + '）。派发异常时可运行 update 获取新版 kit'
+    if ($r.rollback) { $msg += '，或回退 dsh：' + $r.rollback }
+    $r.message = $msg
+  }
+  return $r
 }
 
 # ---- KIT_HOME / state.json ----
@@ -515,6 +582,9 @@ $requestedEffort = ([string]$Effort).ToLowerInvariant()
 $effortMode = [string]$state.effortMode
 if ([string]::IsNullOrWhiteSpace($effortMode)) { $effortMode = 'auto' }
 $warnings = @()
+# 预检已完成：当前 dsh 版本不在 kit-meta.json 的已验证列表时只提示，不判不兼容。
+$dshTestedInfo = Get-KitRunTestedInfo $currentVersion
+if ($dshTestedInfo.message) { $warnings += [string]$dshTestedInfo.message }
 $effectiveEffort = $defaultEffort
 # 用户写死了思考档：忽略 -Effort（先于档位校验，避免因不支持的档而失败）
 if ($effortMode -eq 'fixed' -and -not [string]::IsNullOrWhiteSpace($requestedEffort) -and $requestedEffort -ne $defaultEffort) {
@@ -898,6 +968,7 @@ $progressLine
   $timedOut = $false
   $exitCode = -2
   $status = 'FAILED'
+  $formatUnknown = $false
   # 事件流里的 session 优先；若进程被强杀且没来得及写 session，保留调用方传入的原 SessionId 供续接。
   $sid = $SessionId; $final = $null; $reason = $null
   $toolCalls = 0
@@ -1029,6 +1100,7 @@ $progressLine
     $reason = $ev.reason
     $toolCalls = [int]$ev.toolCalls
     $steps = [int]$ev.steps
+    $knownEvents = [int]$ev.known
     $thinkChars = [int]$ev.thinkChars
     $inTok = [int64]$ev.inTok; $outTok = [int64]$ev.outTok; $cacheTok = [int64]$ev.cacheTok
     $toolErrors = @($ev.toolErrors)
@@ -1036,12 +1108,9 @@ $progressLine
 
     # ---- 严格状态判定：只有 exit=0 + turn_end=completed + final 才算 OK ----
     $errBlob = ($stderr + "`n" + ($errors -join "`n"))
-    $unavailablePattern = 'MISSING_CREDENTIAL|Unauthorized|\b401\b|\b402\b|\b403\b|insufficient|quota|balance|subscription|payment|invalid api key|api key'
-    if ($timedOut) { $status = 'TIMEOUT' }
-    elseif ($startFailure) { $status = 'FAILED' }
-    elseif ($exitCode -eq 0 -and $reason -eq 'completed' -and -not [string]::IsNullOrEmpty([string]$final)) { $status = 'OK' }
-    elseif ($errBlob -match $unavailablePattern) { $status = 'DSH_UNAVAILABLE' }
-    else { $status = 'FAILED' }
+    $statusInfo = Resolve-RunStatus -timedOut $timedOut -startFailure $startFailure -exitCode $exitCode -reason $reason -final $final -knownEvents $knownEvents -errBlob $errBlob
+    $status = [string]$statusInfo.status
+    $formatUnknown = [bool]$statusInfo.formatUnknown
   } catch {
     $status = 'FAILED'
     $errors += "运行异常: $($_.Exception.Message)"
@@ -1052,6 +1121,10 @@ $progressLine
     }
     # 正常、超时、失败都在这里把工作区进度搬回日志目录；Git 快照随后再取。
     Complete-ProgressFile
+  }
+
+  if ($status -eq 'OK' -and $steps -eq 0) {
+    $warnings += '未识别到 step_end 统计事件，步数/tokens 统计可能不准确（dsh 输出格式可能已变化，可运行 kit.ps1 update 检查新版 kit）'
   }
 
   $gitAfter = Get-GitState $Cwd
@@ -1106,6 +1179,12 @@ $progressLine
 
   # ---- 输出摘要 ----
   Write-Output "STATUS: $status"
+  if ($formatUnknown) {
+    Write-Output 'FORMAT: output'
+    $formatReason = '原因: dsh 输出格式无法识别（exit 0，但未识别到 turn_end/final 事件）；dsh 可能已经执行了任务，请先核对工作区变化再决定是否重做。kit 需要更新：运行 kit.ps1 update'
+    if ($dshTestedInfo.rollback) { $formatReason += '；或回退 dsh：' + [string]$dshTestedInfo.rollback }
+    Write-Output $formatReason
+  }
   if ($sid) { Write-Output "sessionId: $sid" } else { Write-Output 'sessionId: null' }
   Write-Output "extendedMin: $extendedMin"
   Write-Output ("exit: {0} | turn_end: {1} | 耗时: {2:N0}s | 模式: {3} | 思考强度: {4}" -f $exitCode, $reason, $sw.Elapsed.TotalSeconds, $effectiveMode, $effectiveEffort)

@@ -25,6 +25,7 @@
 
 3. 初始化：Claude Code 里说 `/dsh-delegate-kit setup`，Codex 里说 `$dsh-delegate-kit setup`，按提示选择模型、思考等级和权限。
 4. 查看全部指令：`/dsh-delegate-kit help`（Codex：`$dsh-delegate-kit help`）。
+5. 以后更新：说 `/dsh-delegate-kit update`（Codex：`$dsh-delegate-kit update`），确认后自动重装两边。dsh 升级后失效时，见子目录 README 的「dsh 升级后失效怎么办」。
 
 详细说明、权限与安全、兼容性和卸载方法见各子目录的 README。
 

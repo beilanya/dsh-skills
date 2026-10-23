@@ -815,6 +815,7 @@ function Invoke-KitCheck {
       baselineVersion = ''
       reasons        = @($lockReason)
       warnings       = @()
+      dshTested      = $null
       features       = [ordered]@{
         browser     = [ordered]@{ available = $false; reason = '未执行' }
         computerUse = [ordered]@{ available = $false; reason = '未执行' }
@@ -834,6 +835,7 @@ function Invoke-KitCheck {
       baselineVersion = ''
       reasons        = @('未初始化：先运行 setup')
       warnings       = @()
+      dshTested      = $null
       features       = [ordered]@{
         browser     = [ordered]@{ available = $false; reason = '未初始化' }
         computerUse = [ordered]@{ available = $false; reason = '未初始化' }
@@ -869,6 +871,9 @@ function Invoke-KitCheck {
   if ($curVersion -and $baseline -and $curVersion -ne $baseline) {
     $warnings.Add('dsh 版本 ' + $baseline + ' -> ' + $curVersion)
   }
+  # 当前 dsh 不在 kit 已验证列表时只警告，不加入 reasons、不影响 ok。
+  $dshTested = Get-KitDshTestedInfo $curVersion
+  if ($dshTested.message) { $warnings.Add([string]$dshTested.message) }
 
   $patches = Get-KitProp $state 'patches'
   $baseInfo = Get-KitProp $patches 'base'
@@ -1286,6 +1291,7 @@ function Invoke-KitCheck {
   Set-KitStateProp $state 'lastCheck' ([ordered]@{ at = $now; ok = $ok; dshVersion = $curVersion })
   Set-KitStateProp $state 'features' $features
   if ($UpdateBaseline -and $ok) {
+    Set-KitStateProp $state 'kitVersion' $script:KitVersion
     if ($curVersion) { Set-KitStateProp $state 'dshVersion' $curVersion }
     if ($dshOk) {
       Set-KitStateProp $state 'dshPackageDir' $dsh.PackageDir
@@ -1310,6 +1316,7 @@ function Invoke-KitCheck {
     baselineVersion = $baseline
     reasons         = @($reasons)
     warnings        = @($warnings)
+    dshTested       = $dshTested
     features        = [ordered]@{
       browser     = [ordered]@{ available = $browserAvail; reason = $browserReason }
       computerUse = [ordered]@{ available = $cuAvail; reason = $cuReason }
@@ -1649,7 +1656,7 @@ function Invoke-KitStatus {
   if ($null -eq $state) {
     return @{
       ExitCode = 2
-      Result = [ordered]@{ initialized = $false; reasons = @('未初始化：先运行 setup') }
+      Result = [ordered]@{ initialized = $false; reasons = @('未初始化：先运行 setup'); dshTested = $null }
       Text = 'dsh-delegate-kit 尚未初始化：先运行 kit.ps1 setup'
     }
   }
@@ -1670,6 +1677,7 @@ function Invoke-KitStatus {
   $curVersion = ''
   $dsh = Find-KitDsh
   if ($dsh.Found) { $curVersion = [string]$dsh.Version }
+  $dshTested = Get-KitDshTestedInfo $curVersion
 
   $features = Get-KitProp $state 'features'
   $browser = Get-KitProp $features 'browser'
@@ -1715,6 +1723,7 @@ function Invoke-KitStatus {
     }
     dshVersion        = $baselineVersion
     currentDshVersion = $curVersion
+    dshTested         = $dshTested
     lastCheck         = [ordered]@{ at = $lastCheckAt; ok = $lastCheckOk }
     patchesDir        = $paths.Patches
     logsDir           = $paths.Logs
@@ -1757,6 +1766,11 @@ function Invoke-KitStatus {
   if ($compReason) { $pLine += '：' + $compReason }
   $lines.Add($pLine)
   $lines.Add('dsh 基线版本：' + $baselineVersion + '；当前版本：' + $curVersion)
+  if ($dshTested.tested) {
+    $lines.Add('dsh 版本：' + $curVersion + '（已验证）')
+  } elseif ($dshTested.message) {
+    $lines.Add([string]$dshTested.message)
+  }
   $checkText = '未运行'
   if ($lastCheckAt) {
     $checkText = $lastCheckAt + ' ' + $(if ($lastCheckOk) { '通过' } else { '不通过' })

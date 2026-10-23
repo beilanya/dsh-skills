@@ -29,6 +29,7 @@
 | `repair` | dsh 升级或自检失败后修复：重新识别插件、按当前模型目录重新生成补丁、再自检 | `-InstallPlugins`：把 headless 插件版本对齐到 dsh（先征求你同意） |
 | `stats` | 委派效率统计（按思考档、是否挂浏览器分组：次数、耗时、步数、工具调用、token） | `-Days <n>`：只看最近 n 天 |
 | `diag` | 生成诊断包 zip（版本、自检结果、日志末尾、状态文件；已脱敏，不含任何 Key） | — |
+| `update` | 检查 gitee 上的新版 kit：显示当前版本、最新版本、更新内容（只拉到临时目录比对，不改动已安装文件） | `-Apply`：确认后重装到本机所有已安装的副本（Claude、Codex 一起），再自检；`-Force`：没有新版也重装 |
 | `rules` | 查看或追加全局规则段落（让主 Agent 主动委派） | `-Host claude\|codex`；`-Show` 只看；`-Apply` 追加（会先备份）；`-RulesFile <路径>` 指定文件 |
 | `uninstall` | 卸载 | `-Host claude\|codex` 只移除该宿主的规则段落；不传 `-Host` 时移除两边规则并删除补丁和状态；`-RemoveSkills` 删 Skill 文件；`-PurgeLogs` 删日志；`-ClaudeSkillsDir`/`-CodexSkillsDir` 指定自定义安装目录 |
 
@@ -60,6 +61,17 @@ Claude 用 `scripts\dsh-run.ps1`，Codex 用 `scripts\dsh-dispatch.ps1`，参数
 | `FAILED` / `TIMEOUT` | 失败或超时 | 先从进度文件和 sessionId 挽救结论，再决定重派或接手 |
 | `DSH_UNAVAILABLE` | 未初始化、dsh 不存在、凭证或额度问题 | 回退到宿主自带方式，并告诉你原因 |
 | `DSH_INCOMPATIBLE` | dsh 升级后不兼容，或所需可选功能不可用 | 回退并建议运行 `repair` |
+| `DSH_INCOMPATIBLE` + `FORMAT: output` | dsh 跑完了，但 kit 认不出新版 dsh 的输出格式 | 先核对工作区（任务可能已做完），只补做剩下的部分；建议运行 `update`，或回退 dsh |
+
+## dsh 升级后失效怎么办
+
+一般不用管：派发失败时主 Agent 会自动改用宿主自带方式完成任务，并告诉你原因。想恢复 dsh 委派，按顺序试：
+
+1. `repair`：配置层的不兼容（插件 id、补丁格式、思考档写法变了）大多能自动修好。
+2. `update`：repair 修不好，或提示 `FORMAT: output` 时，说明需要新版 kit；有新版就按提示更新。
+3. 回退 dsh：暂时没有新版 kit 时，把 dsh 装回已验证的版本（`check` / `status` 会给出命令，例如 `npm i -g @deepseek-ai/dsh@0.2.1-rc.2`），下次派发会自动自检恢复。注意 DSH 桌面端用的也是这个 dsh。
+
+`status` 和每次派发的摘要会提示当前 dsh 版本是否经过本 kit 验证。
 
 ## 文件位置
 

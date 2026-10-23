@@ -1,0 +1,7 @@
+{
+  "testedDshVersions": ["0.2.1-rc.2"],
+  "recommendedDshVersion": "0.2.1-rc.2",
+  "updateSource": "https://gitee.com/beilanya/dsh-skills.git",
+  "updateBranch": "main",
+  "packagePath": "dsh-delegate-kit"
+}

@@ -1088,5 +1088,341 @@ function Invoke-KitUninstall {
   return [ordered]@{ ExitCode = $exitCode; Result = $result; Text = ($textLines -join "`n") }
 }
 
+# ---------------------------------------------------------------- update
+
+function ConvertTo-KitUpdateVersion([string]$version) {
+  if (-not $version) { return $null }
+  $core = ($version -split '-', 2)[0]
+  try { return [version]$core } catch { return $null }
+}
+
+function Get-KitUpdateManualSteps([string]$source, [string]$packagePath) {
+  return (@(
+    '手动更新步骤：',
+    ('  git clone ' + $source),
+    ('  cd ' + $packagePath),
+    '  powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Target both -Force',
+    '只装了 Claude 或 Codex 时，把 both 换成 claude 或 codex。'
+  ) -join "`n")
+}
+
+function Get-KitUpdateOutputTail([string]$text, [int]$count) {
+  $lines = @(([string]$text) -split "`r?`n" | Where-Object { $_.Trim() })
+  if ($lines.Count -eq 0) { return '' }
+  return (($lines | Select-Object -Last $count) -join "`n")
+}
+
+function Invoke-KitUpdate {
+  param(
+    [switch]$Apply,
+    [switch]$Force
+  )
+
+  $currentVersion = [string]$script:KitVersion
+  $meta = Get-KitMeta
+  $source = [string]$meta.updateSource
+  $branch = [string]$meta.updateBranch
+  $packagePath = [string]$meta.packagePath
+  if (-not $branch) { $branch = 'main' }
+  if (-not $packagePath) { $packagePath = 'dsh-delegate-kit' }
+  $manual = Get-KitUpdateManualSteps $source $packagePath
+  $textLines = New-Object System.Collections.ArrayList
+  $result = [ordered]@{
+    currentVersion = $currentVersion
+    latestVersion = $null
+    updateAvailable = $false
+    changes = @()
+    installed = @()
+    source = $source
+    dshVersion = $null
+    dshTestedInNew = $false
+  }
+
+  $gitCmd = Get-Command git -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $gitCmd -or -not $gitCmd.Source) {
+    [void]$textLines.Add('找不到 git 命令，无法检查更新。')
+    [void]$textLines.Add($manual)
+    return [ordered]@{ ExitCode = 1; Result = $result; Text = ($textLines -join "`n") }
+  }
+
+  # 已安装副本：marker 可解析且 host 匹配才算；按目标路径去重
+  $installed = New-Object System.Collections.ArrayList
+  $seen = @{}
+  foreach ($h in @('claude', 'codex')) {
+    $cand = Get-KitSkillTarget $h ''
+    if (-not $cand.Target) { continue }
+    $markerPath = Join-Path $cand.Target '.kit-install.json'
+    if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) { continue }
+    $marker = $null
+    try { $marker = Read-KitJson $markerPath } catch { $marker = $null }
+    if ($null -eq $marker) { continue }
+    if ([string](Get-KitProp $marker 'host') -ine $h) { continue }
+    $target = [IO.Path]::GetFullPath($cand.Target).TrimEnd([char[]]@('\', '/'))
+    $key = $target.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+    [void]$installed.Add([ordered]@{
+      host = $h
+      target = $target
+      skillsRoot = (Split-Path -Parent $target)
+      installedVersion = [string](Get-KitProp $marker 'kitVersion')
+    })
+  }
+  $result.installed = @($installed)
+
+  $paths = Get-KitPaths
+  $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+  $rand = -join (1..4 | ForEach-Object { '0123456789abcdef'[(Get-Random -Maximum 16)] })
+  $base = if (Test-Path -LiteralPath $paths.Home -PathType Container) { Join-Path $paths.Home 'update' } else { Join-Path ([IO.Path]::GetTempPath()) 'dsh-delegate-kit-update' }
+  $tmp = Join-Path $base ($stamp + '-' + $rand)
+  $repo = Join-Path $tmp 'repo'
+  $oldLocation = $null
+  $oldCurrentDir = $null
+
+  try {
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $cloneArgs = @('clone', '--depth', '1', '--branch', $branch, '--quiet', $source, $repo)
+    # 公开仓库不需要凭据；禁止 git 弹出凭据提示或窗口，避免后台卡住
+    $prevPrompt = $env:GIT_TERMINAL_PROMPT
+    $prevGcm = $env:GCM_INTERACTIVE
+    $env:GIT_TERMINAL_PROMPT = '0'
+    $env:GCM_INTERACTIVE = 'never'
+    try {
+      $clone = Invoke-KitProcess $gitCmd.Source $cloneArgs (Get-KitWorkDir) 180
+    } finally {
+      $env:GIT_TERMINAL_PROMPT = $prevPrompt
+      $env:GCM_INTERACTIVE = $prevGcm
+    }
+    if ($clone.TimedOut -or $clone.ExitCode -ne 0) {
+      $reason = Get-KitUpdateOutputTail $clone.Err 6
+      if (-not $reason) { $reason = Get-KitUpdateOutputTail $clone.Out 6 }
+      if (-not $reason) { $reason = 'git clone 退出码 ' + $clone.ExitCode }
+      [void]$textLines.Add("拉取新版失败（$source，分支 $branch）：")
+      [void]$textLines.Add($reason)
+      [void]$textLines.Add('')
+      [void]$textLines.Add($manual)
+      return [ordered]@{ ExitCode = 1; Result = $result; Text = ($textLines -join "`n") }
+    }
+
+    $newPkg = Join-Path $repo $packagePath
+    $newInstall = Join-Path $newPkg 'install.ps1'
+    $latestVersion = $null
+    $installText = Read-KitText $newInstall
+    if ($installText) {
+      $vm = [regex]::Match($installText, '\$script:KitVersion\s*=\s*''([^'']+)''')
+      if ($vm.Success) { $latestVersion = $vm.Groups[1].Value }
+    }
+    if (-not $latestVersion) {
+      [void]$textLines.Add("读不到新包版本：$newInstall")
+      [void]$textLines.Add($manual)
+      return [ordered]@{ ExitCode = 1; Result = $result; Text = ($textLines -join "`n") }
+    }
+
+    $cmpCurrent = ConvertTo-KitUpdateVersion $currentVersion
+    $cmpLatest = ConvertTo-KitUpdateVersion $latestVersion
+    if ($null -ne $cmpCurrent -and $null -ne $cmpLatest) {
+      $updateAvailable = ($cmpLatest -gt $cmpCurrent)
+    } else {
+      $updateAvailable = ($latestVersion -ne $currentVersion)
+    }
+
+    # 变更记录：只取版本比当前新的行
+    $changes = New-Object System.Collections.ArrayList
+    $maintText = Read-KitText (Join-Path $newPkg 'docs\MAINTENANCE.md')
+    if ($maintText) {
+      foreach ($ln in ($maintText -split "`r?`n")) {
+        $cm = [regex]::Match($ln, '^- (\d+\.\d+\.\d+)（')
+        if (-not $cm.Success) { continue }
+        $lineVersion = $cm.Groups[1].Value
+        $cmpLine = ConvertTo-KitUpdateVersion $lineVersion
+        if ($null -ne $cmpLine -and $null -ne $cmpCurrent) {
+          $isNewer = ($cmpLine -gt $cmpCurrent)
+        } else {
+          $isNewer = ($lineVersion -ne $currentVersion)
+        }
+        if ($isNewer) { [void]$changes.Add($ln.TrimEnd()) }
+      }
+    }
+
+    $dshInfo = Find-KitDsh
+    $dshVersion = [string]$dshInfo.Version
+    if (-not $dshVersion) { $dshVersion = $null }
+    $newMeta = $null
+    try { $newMeta = Read-KitJson (Join-Path $newPkg 'scripts\lib\kit-meta.json') } catch { $newMeta = $null }
+    $tested = @()
+    $testedVal = Get-KitProp $newMeta 'testedDshVersions'
+    if ($testedVal) { $tested = @($testedVal | ForEach-Object { [string]$_ }) }
+    $dshTestedInNew = [bool]($dshVersion -and ($tested -contains $dshVersion))
+
+    $result.latestVersion = $latestVersion
+    $result.updateAvailable = $updateAvailable
+    $result.changes = @($changes)
+    $result.dshVersion = $dshVersion
+    $result.dshTestedInNew = $dshTestedInNew
+
+    if (-not $Apply) {
+      if ($updateAvailable) {
+        [void]$textLines.Add("当前版本：$currentVersion")
+        [void]$textLines.Add("最新版本：$latestVersion")
+        [void]$textLines.Add('')
+        [void]$textLines.Add('更新内容：')
+        if ($changes.Count -eq 0) {
+          [void]$textLines.Add('  （新版未提供比当前版本更新的变更记录）')
+        } else {
+          foreach ($c in $changes) { [void]$textLines.Add('  ' + $c) }
+        }
+        [void]$textLines.Add('')
+        [void]$textLines.Add('确认更新请运行：kit.ps1 update -Apply')
+      } else {
+        [void]$textLines.Add("已是最新版本 $currentVersion")
+      }
+      return [ordered]@{ ExitCode = 0; Result = $result; Text = ($textLines -join "`n") }
+    }
+
+    if (-not $updateAvailable -and -not $Force) {
+      [void]$textLines.Add('已是最新版本，无需更新（加 -Force 可强制重装）')
+      return [ordered]@{ ExitCode = 0; Result = $result; Text = ($textLines -join "`n") }
+    }
+    if ($installed.Count -eq 0) {
+      [void]$textLines.Add('找不到已安装的 dsh-delegate-kit skill 目录（Claude 或 Codex）。')
+      [void]$textLines.Add('请手动安装：')
+      [void]$textLines.Add('  powershell -NoProfile -ExecutionPolicy Bypass -File "' + $newInstall + '" -Target both -Force')
+      return [ordered]@{ ExitCode = 1; Result = $result; Text = ($textLines -join "`n") }
+    }
+
+    # 当前目录若在目标 skill 目录里，重装期间会被替换；先切到工作目录
+    $oldLocation = (Get-Location).Path
+    $oldCurrentDir = [Environment]::CurrentDirectory
+    $workDir = Get-KitWorkDir
+    try {
+      Set-Location -LiteralPath $workDir -ErrorAction Stop
+      [Environment]::CurrentDirectory = $workDir
+    } catch {
+      [void]$textLines.Add("切换工作目录失败：$($_.Exception.Message)")
+      return [ordered]@{ ExitCode = 1; Result = $result; Text = ($textLines -join "`n") }
+    }
+
+    $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $installResults = New-Object System.Collections.ArrayList
+    $failedCount = 0
+    foreach ($copy in @($installed)) {
+      $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $newInstall, '-Target', [string]$copy.host)
+      if ($copy.host -eq 'claude') {
+        $argList += @('-ClaudeSkillsDir', [string]$copy.skillsRoot)
+      } else {
+        $argList += @('-CodexSkillsDir', [string]$copy.skillsRoot)
+      }
+      $argList += '-Force'
+      $ir = Invoke-KitProcess $psExe $argList $workDir 180
+      $ok = [bool]($ir.ExitCode -eq 0 -and -not $ir.TimedOut)
+      if (-not $ok) { $failedCount++ }
+      $outTail = Get-KitUpdateOutputTail $ir.Out 5
+      if (-not $outTail) { $outTail = Get-KitUpdateOutputTail $ir.Err 5 }
+      [void]$installResults.Add([ordered]@{
+        host = [string]$copy.host
+        target = [string]$copy.target
+        fromVersion = [string]$copy.installedVersion
+        toVersion = $latestVersion
+        exitCode = [int]$ir.ExitCode
+        timedOut = [bool]$ir.TimedOut
+        ok = $ok
+        output = $outTail
+      })
+    }
+
+    # 自检：沿用已安装副本的 kit.ps1；没有 state.json 说明尚未 setup
+    $checkSummary = $null
+    $repairSummary = $null
+    $selfCheckNote = ''
+    $statePath = Join-Path $paths.Home 'state.json'
+    $firstOk = $installResults | Where-Object { $_.ok } | Select-Object -First 1
+    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
+      $selfCheckNote = '未找到 state.json，跳过自检；请先运行 kit.ps1 setup 初始化配置'
+    } elseif (-not $firstOk) {
+      $selfCheckNote = '没有安装成功的副本，跳过自检'
+    } else {
+      $checkKit = Join-Path ([string]$firstOk.target) 'scripts\kit.ps1'
+      if (-not (Test-Path -LiteralPath $checkKit -PathType Leaf)) {
+        $selfCheckNote = "找不到自检入口，跳过自检：$checkKit"
+      } else {
+        $checkArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $checkKit, 'check', '-Json', '-UpdateBaseline')
+        $cr = Invoke-KitProcess $psExe $checkArgs $workDir 180
+        $checkJson = $null
+        if ($cr.Out -and $cr.Out.Trim()) {
+          try { $checkJson = $cr.Out | ConvertFrom-Json } catch { $checkJson = $null }
+        }
+        $checkOk = [bool](Get-KitProp $checkJson 'ok')
+        $checkSummary = [ordered]@{
+          ran = $true
+          exitCode = [int]$cr.ExitCode
+          ok = $checkOk
+          timedOut = [bool]$cr.TimedOut
+          result = $checkJson
+        }
+        if (-not $checkOk) {
+          $repairArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $checkKit, 'repair', '-Json')
+          $rr = Invoke-KitProcess $psExe $repairArgs $workDir 180
+          $repairJson = $null
+          if ($rr.Out -and $rr.Out.Trim()) {
+            try { $repairJson = $rr.Out | ConvertFrom-Json } catch { $repairJson = $null }
+          }
+          $repairSummary = [ordered]@{
+            ran = $true
+            exitCode = [int]$rr.ExitCode
+            ok = [bool](Get-KitProp $repairJson 'ok')
+            timedOut = [bool]$rr.TimedOut
+            result = $repairJson
+          }
+        }
+      }
+    }
+
+    $result.install = @($installResults)
+    $result.check = $checkSummary
+    $result.repair = $repairSummary
+    if ($selfCheckNote) { $result.selfCheckNote = $selfCheckNote }
+
+    if ($failedCount -eq 0) {
+      [void]$textLines.Add("已更新到 $latestVersion（原版本 $currentVersion）")
+    } else {
+      [void]$textLines.Add("更新到 $latestVersion 未全部成功（原版本 $currentVersion）")
+    }
+    foreach ($ir in $installResults) {
+      if ($ir.ok) {
+        [void]$textLines.Add('[' + $ir.host + '] 安装成功：' + $ir.target)
+      } else {
+        $detail = if ($ir.timedOut) { '超时' } else { '退出码 ' + $ir.exitCode }
+        [void]$textLines.Add('[' + $ir.host + '] 安装失败（' + $detail + '）：' + $ir.target)
+        if ($ir.output) { [void]$textLines.Add('  ' + $ir.output) }
+      }
+    }
+    if ($selfCheckNote) {
+      [void]$textLines.Add('自检：' + $selfCheckNote)
+    } elseif ($null -ne $checkSummary) {
+      $checkText = if ($checkSummary.ok) { '通过' } else { '未通过' }
+      if ($null -ne $repairSummary) {
+        $repairText = if ($repairSummary.ok) { 'repair 后通过' } else { 'repair 后仍未通过' }
+        [void]$textLines.Add("自检：check $checkText，$repairText")
+      } else {
+        [void]$textLines.Add("自检：check $checkText")
+      }
+    }
+    [void]$textLines.Add('Claude Code 和 Codex 需要开新会话（Codex 桌面端可能需要重启）才会加载新的 SKILL.md')
+
+    $exitCode = if ($failedCount -gt 0) { 1 } else { 0 }
+    return [ordered]@{ ExitCode = $exitCode; Result = $result; Text = ($textLines -join "`n") }
+  } finally {
+    if ($oldLocation) {
+      try { Set-Location -LiteralPath $oldLocation -ErrorAction Stop } catch { }
+    }
+    if ($oldCurrentDir) {
+      try { [Environment]::CurrentDirectory = $oldCurrentDir } catch { }
+    }
+    if (Test-Path -LiteralPath $tmp) {
+      try { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction Stop } catch { }
+    }
+  }
+}
+
 # ---------------------------------------------------------------- 导出给 kit.ps1（dot-source 后直接可用）
-# Invoke-KitStats / Invoke-KitDiag / Invoke-KitRules / Invoke-KitUninstall
+# Invoke-KitStats / Invoke-KitDiag / Invoke-KitRules / Invoke-KitUninstall / Invoke-KitUpdate

@@ -40,6 +40,7 @@ Codex 里用 `$dsh-delegate-kit <子命令>` 点名（也可以在 `/skills` 里
 - `repair`：按当前 dsh 版本重新识别插件 id、按当前模型目录重新生成补丁，再跑 check。需要对齐插件版本时，先把安装命令给用户看，同意后加 `-InstallPlugins` 重跑。
 - `stats [-Days 30]`：按 index 统计效率。用户问效率或要调默认思考档时用它，不凭印象。
 - `diag`：生成诊断包（版本、check 输出、日志末尾、状态文件，不含 Key），报告路径。
+- `update`：检查新版 kit。用户说 `$dsh-delegate-kit update` 或“更新 kit”就视为同意联网查询，运行 `kit.ps1 update`（从 gitee 拉取到临时目录比对，不改动已安装文件），把当前版本、最新版本、更新内容、新版是否验证过本机 dsh 版本告诉用户。有新版时问用户是否更新，同意后运行 `kit.ps1 update -Apply`：重装到本机所有已安装的副本（Claude 和 Codex 一起），再自动 check（失败时自动 repair）。完成后提醒用户开新会话（桌面端可能需要重启）才会加载新的 SKILL.md。找不到 git 或拉取失败时，转述输出里的手动更新步骤。
 - `uninstall`：先说明会做什么，用户同意后执行。
   - `kit.ps1 uninstall -Host codex`：只移除 AGENTS.md 里的规则段落（先备份），保留补丁、状态和日志（Claude 可能还在用）。
   - `kit.ps1 uninstall`（不传 -Host，等于 all）：移除两边的规则段落，并删除 kit 生成的补丁、状态等数据；加 `-RemoveSkills` 才删 Skill 文件，加 `-PurgeLogs` 才删日志（这两项只在 all 时生效）；备份目录始终保留。
@@ -71,7 +72,8 @@ Codex 里用 `$dsh-delegate-kit <子命令>` 点名（也可以在 `/skills` 里
 
 ### 粒度与拆分
 
-- 一个任务按 20-40 分钟能做完来切。预计超过 20 分钟时，先考虑拆成 2-5 个互不依赖的子任务并行派发，各用不同目录或 git worktree，不改同一文件。只读审查、检索优先拆；同一区域的修改不能分给多个执行者。
+- 一个任务按 20-40 分钟能做完来切。预计超过 20 分钟时，先由主 Agent 划好边界，拆成互不依赖的子任务并行派发。数量按实际能切出的独立块来定，不要习惯性只拆 2-3 个；同时运行的 dsh 任务上限 8 个，常见 4-6 个（再多会碰到服务商限流，主 Agent 也审不过来），超过上限的排到下一批。各用不同目录或 git worktree，不改同一文件。只读审查、检索优先拆；同一区域的修改不能分给多个执行者。
+- 拆分只为提速：拆之前估算并行后的总耗时（最慢的子任务 + 写单和审核的时间）是否明显短于不拆。每个子任务都要重读背景和代码，拆得越碎重复读取的 token 越多。子任务只有几分钟、彼此要等结果、要改同一批文件、或合并结果比执行还费事时，不拆或少拆。电脑操作任务会排队串行，拆了也不会更快。
 - 运行约定由 `dsh-run.ps1` 自动追加（时间预算与硬截止、75% 时收尾、结论追加写进 progress 文件、不派子 Agent、并行发起互不依赖的调用、失败两次换方法、输出约 200 行以内、脚本复用、上下文压缩提醒；浏览器、电脑操作规则按开关追加）。几分钟的小任务可用 `-NoProtocol`。
 - 进度文件位置随权限变化（Windows 上 dsh 沙箱只允许写工作区）：workspace-write 时在工作区的 `.dsh-delegate-kit\` 下，结束后脚本把它移到日志目录并删除这个子目录；read-only 时不能写进度文件，执行者把阶段结论写在回复里，所以只读的长任务更要拆小；danger-full-access 时直接写在日志目录。
 - 同一区域的后续任务用 `-SessionId` 续接，任务单只写新增目标。换区域、旧会话接近 20 万 token、或方向走偏时开新会话。
@@ -114,6 +116,8 @@ dispatcher 立即返回 `STATUS: DISPATCHED` 和 taskId、workerPid、request/su
 3. 按 STATUS 处理：
    - `OK`：进入审核。
    - `DSH_UNAVAILABLE`（未初始化、dsh 不存在、凭证缺失、鉴权或额度失效）或 `DSH_INCOMPATIBLE`（dsh 升级后补丁不兼容、所需可选功能不可用）：本任务由主 Agent 自己做，或用 Codex 自己的子代理机制，任务单原样复用、授权范围不变。向用户报告一次原因；`DSH_INCOMPATIBLE` 时转述原因并建议运行 `$dsh-delegate-kit repair`；原因是 `FEATURE: browser` / `FEATURE: computerUse` 时，任务不依赖该功能也可以去掉参数重派。
+     - 摘要带 `FORMAT: output` 时不同：dsh 已经跑完，只是 kit 认不出新版的输出格式，任务可能已经做完。先看摘要里的 git 变化和最终回复、核对工作区，只补做没完成的部分，不要整单重做。告诉用户这需要新版 kit：建议运行 `$dsh-delegate-kit update`；没有新版时，可以按摘要里的命令把 dsh 回退到已验证版本。repair 修不了这种情况。
+   - 摘要里出现“未经本 kit 验证”的警告时，照常审核，并告诉用户一次：当前 dsh 版本没测过；出问题时运行 `$dsh-delegate-kit update`，或按警告里的命令回退 dsh。
    - `TIMEOUT` / `FAILED`：先挽救。读 progress 尾部，用同一 SessionId 和 cwd 续接，任务单写「不要再调用任何工具，直接根据已有分析按原返回格式输出结论」，`-TimeoutMin 20`。再决定重派、拆小或主 Agent 接手。
 
 ## 4. 审核（主 Agent 必做）
@@ -150,4 +154,4 @@ dispatcher 立即返回 `STATUS: DISPATCHED` 和 taskId、workerPid、request/su
 - `<taskId>.running`：worker 标记；runner 的 `<taskId>.run.running` 有 pid、deadline、progress、extend 路径。临近截止且已在收尾时，往 `extend` 路径写 1-120 的分钟数延时；卡死时不延时。
 - `index.jsonl`：每次真正启动过 dsh 的运行结束时追加一条（预检或参数错误提前退出的不记），可按 label、sessionId、cwd 找回。
 
-回调失败只记录在 completion，不覆盖结果，不自动重发。dsh 升级后功能失效时先运行 `check`，再读本 Skill 目录下的 `docs\MAINTENANCE.md`。
+回调失败只记录在 completion，不覆盖结果，不自动重发。dsh 升级后功能失效时，按这个顺序处理：`check` 看原因 → `repair`（配置层问题）→ `update`（需要新版 kit，例如 `FORMAT: output`）→ 回退 dsh 到已验证版本（命令见 check/status 输出）。需要回归测试时读本 Skill 目录下的 `docs\MAINTENANCE.md`。

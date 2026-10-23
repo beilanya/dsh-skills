@@ -1,7 +1,7 @@
 ﻿# dsh-delegate-kit 共用函数（由 kit.ps1 dot-source；dsh-run.ps1 不依赖本文件）。
 # 兼容 Windows PowerShell 5.1。给人看的提示一律走 Write-KitInfo，不要用 Write-Output（会混进返回值）。
 
-$script:KitVersion = '0.1.0'
+$script:KitVersion = '0.2.0'
 $script:KitUtf8 = New-Object System.Text.UTF8Encoding($false)
 $script:KitJsonMode = $false
 $script:KitModes = @('read-only', 'workspace-write', 'danger-full-access')
@@ -123,6 +123,50 @@ function Save-KitState($state) {
   Write-KitJson (Get-KitPaths).State $state
 }
 function Get-KitModeRank([string]$mode) { return [array]::IndexOf($script:KitModes, $mode) }
+
+# ---- 包元数据（scripts\lib\kit-meta.json：已验证的 dsh 版本、更新源）----
+function Get-KitMeta {
+  $r = [ordered]@{
+    testedDshVersions     = @()
+    recommendedDshVersion = ''
+    updateSource          = ''
+    updateBranch          = 'main'
+    packagePath           = 'dsh-delegate-kit'
+  }
+  $m = $null
+  try { $m = Read-KitJson (Join-Path $PSScriptRoot 'kit-meta.json') } catch { $m = $null }
+  if ($null -ne $m) {
+    $tv = Get-KitProp $m 'testedDshVersions'
+    if ($tv) { $r.testedDshVersions = @($tv | ForEach-Object { [string]$_ }) }
+    foreach ($k in @('recommendedDshVersion', 'updateSource', 'updateBranch', 'packagePath')) {
+      $v = [string](Get-KitProp $m $k)
+      if ($v) { $r[$k] = $v }
+    }
+  }
+  # 测试或镜像用：环境变量覆盖更新源（可以是本地仓库路径）
+  if ($env:DSH_KIT_UPDATE_SOURCE) { $r.updateSource = [string]$env:DSH_KIT_UPDATE_SOURCE }
+  return $r
+}
+function Get-KitDshTestedInfo([string]$version) {
+  # 当前 dsh 版本是否在本 kit 验证过的列表里；未验证只提示，不判不兼容
+  $meta = Get-KitMeta
+  $tested = @($meta.testedDshVersions)
+  $r = [ordered]@{
+    version     = $version
+    tested      = [bool]($version -and ($tested -contains $version))
+    testedList  = $tested
+    recommended = [string]$meta.recommendedDshVersion
+    rollback    = ''
+    message     = ''
+  }
+  if ($r.recommended) { $r.rollback = 'npm i -g @deepseek-ai/dsh@' + $r.recommended }
+  if ($version -and -not $r.tested -and $tested.Count -gt 0) {
+    $msg = 'dsh ' + $version + ' 未经本 kit 验证（已验证：' + ($tested -join '、') + '）。派发异常时可运行 update 获取新版 kit'
+    if ($r.rollback) { $msg += '，或回退 dsh：' + $r.rollback }
+    $r.message = $msg
+  }
+  return $r
+}
 
 # ---- 定位 dsh / node ----
 function Find-KitDsh {

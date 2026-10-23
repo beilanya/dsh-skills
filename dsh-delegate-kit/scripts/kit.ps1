@@ -16,12 +16,13 @@ kit.ps1 — dsh-delegate-kit 入口。用法：
                              展示 / 追加全局规则段落（追加前备份）
   uninstall [-Host claude|codex|all] [-RulesFile <路径>] [-RemoveSkills] [-PurgeLogs]
             [-ClaudeSkillsDir <目录>] [-CodexSkillsDir <目录>]
+  update [-Apply] [-Force]    检查 gitee 上的新版 kit；-Apply 时重装到已安装的目录并自检。
 -Json：stdout 只输出一个 JSON 对象，提示写 stderr。
 环境变量：DSH_HOME（默认 ~\.dsh）、DSH_KIT_HOME（默认 <DSH_HOME>\dsh-delegate-kit）。
 #>
 param(
   [Parameter(Position = 0)]
-  [ValidateSet('setup', 'check', 'repair', 'status', 'stats', 'diag', 'rules', 'uninstall', 'help')]
+  [ValidateSet('setup', 'check', 'repair', 'status', 'stats', 'diag', 'rules', 'uninstall', 'update', 'help')]
   [string]$Command = 'help',
   [string]$Model,
   [string]$Effort,
@@ -41,7 +42,8 @@ param(
   [switch]$PurgeLogs,
   [string]$ClaudeSkillsDir = '',
   [string]$CodexSkillsDir = '',
-  [switch]$Json
+  [switch]$Json,
+  [switch]$Force
 )
 
 $ErrorActionPreference = 'Continue'
@@ -62,6 +64,7 @@ switch ($Command) {
   'diag'      { $r = Invoke-KitDiag }
   'rules'     { $r = Invoke-KitRules -HostName $HostName -Show:$Show -Apply:$Apply -RulesFile $RulesFile }
   'uninstall' { $r = Invoke-KitUninstall -HostName $HostName -RulesFile $RulesFile -RemoveSkills:$RemoveSkills -PurgeLogs:$PurgeLogs -ClaudeSkillsDir $ClaudeSkillsDir -CodexSkillsDir $CodexSkillsDir }
+  'update'    { $r = Invoke-KitUpdate -Apply:$Apply -Force:$Force }
   default {
     # 详细说明以 docs\HELP.md 为准；找不到时退回本文件开头的注释块
     $helpDoc = Join-Path (Split-Path -Parent $PSScriptRoot) 'docs\HELP.md'

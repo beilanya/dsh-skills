@@ -2,7 +2,7 @@
 
 本文件说明这个包的组成、运行时数据、已核实的关键事实、兼容与升级机制、排障步骤和回归清单。改动脚本或 dsh 升级后，先读本文件，再按第 6 节回归。
 
-当前版本：`0.1.0`（2026-10-23）。
+当前版本：`0.2.0`（2026-10-23）。
 
 ## 1. 组成文件
 
@@ -14,13 +14,14 @@
 | `install.ps1` | 安装、覆盖、`-WhatIf` 预览、`-Uninstall` 卸载；只操作叶子名为 `dsh-delegate-kit` 的目录 | UTF-8 **带 BOM** |
 | `claude\SKILL.md` | Claude Code 侧的 setup/派发/审核/续接流程和提示格式 | UTF-8 无 BOM |
 | `codex\SKILL.md` | Codex 侧的 setup/dispatch/回调/审核/续接流程 | UTF-8 无 BOM |
-| `scripts\kit.ps1` | 子命令入口：setup、check、repair、status、stats、diag、rules、uninstall | UTF-8 **带 BOM** |
+| `scripts\kit.ps1` | 子命令入口：setup、check、repair、status、stats、diag、rules、uninstall、update、help | UTF-8 **带 BOM** |
 | `scripts\dsh-run.ps1` | 执行器：预检、拼补丁、启动 `dsh headless --json`、解析事件、写摘要和 index；自包含，不 dot-source `common.ps1` | UTF-8 **带 BOM** |
 | `scripts\dsh-dispatch.ps1` | Codex 专用：隐藏启动独立 worker，worker 调 `dsh-run.ps1`，完成后用 `codex queue` 回调 | UTF-8 **带 BOM** |
 | `scripts\uia.ps1` | UIA 辅助脚本：按元素名称读取、点击、输入、等待，供电脑操作任务使用 | UTF-8 **带 BOM** |
 | `scripts\lib\common.ps1` | kit 共用函数：路径、state、定位 dsh/node、UTF-8/BOM、调用 helper、Chrome/Edge 探测、插件状态 | UTF-8 **带 BOM** |
 | `scripts\lib\setup.ps1` | setup、check、repair、status 的实现 | UTF-8 **带 BOM** |
-| `scripts\lib\maint.ps1` | stats、diag、rules、uninstall 的实现 | UTF-8 **带 BOM** |
+| `scripts\lib\maint.ps1` | stats、diag、rules、uninstall、update 的实现 | UTF-8 **带 BOM** |
+| `scripts\lib\kit-meta.json` | 包元数据：`testedDshVersions`（已验证的 dsh 版本）、`recommendedDshVersion`（回退建议）、`updateSource` / `updateBranch` / `packagePath`（update 的拉取来源） | UTF-8 无 BOM |
 | `scripts\lib\dshkit.mjs` | Node 助手：解析 profile/dump YAML、查 pi-ai 模型目录、生成补丁；stdout 只输出一个 JSON | UTF-8 无 BOM |
 | `templates\rules-claude.md` | 追加到 `~\.claude\CLAUDE.md` 的规则模板，`{{DATE}}`、`{{MODEL}}`、`{{EFFORT_DESC}}`、`{{MODE}}` 由脚本替换 | UTF-8 无 BOM |
 | `templates\rules-codex.md` | 追加到 `$CODEX_HOME\AGENTS.md`（未设置时 `~\.codex\AGENTS.md`）的规则模板 | UTF-8 无 BOM |
@@ -63,7 +64,7 @@
 | 字段 | 含义 |
 |---|---|
 | `schemaVersion` | 状态结构版本，当前为 1 |
-| `kitVersion` | kit 版本，当前 `0.1.0` |
+| `kitVersion` | 最近一次 setup 或通过的 `check -UpdateBaseline` 所用的 kit 版本，当前 `0.2.0` |
 | `createdAt` / `updatedAt` | 创建/最后更新时间（ISO 8601） |
 | `dshHome` | 使用的 DSH_HOME |
 | `dshVersion` | 基线 dsh 版本；派发前预检用它比对 |
@@ -250,6 +251,13 @@ console.log((text.match(/compaction\/start/g) || []).length);
 9. 思考档、权限不合法 → `FAILED`，参数错误 exit 2。
 10. 等电脑操作锁时出现非 `AbandonedMutexException` 的异常 → `FAILED` exit 1，清理 `.running`、工作区进度目录并释放互斥锁，不误报 `TIMEOUT`。
 11. 运行后 git 快照取不到时，摘要提示无法取得运行后快照，`index.newGitEntries` 写 null。预检或参数错误提前退出的运行不写 `index.jsonl`。
+12. 当前 dsh 版本不在 `kit-meta.json` 的 `testedDshVersions` 里时，摘要加一条“未经本 kit 验证”警告（含回退命令），不影响派发。
+
+### 运行后的状态判定
+
+`Resolve-RunStatus` 按顺序判定：超时 → `TIMEOUT`；启动失败 → `FAILED`；exit 0 且 `turn_end` 的 `reason.kind=completed` 且有 `final` → `OK`；stderr/错误事件匹配凭证、鉴权、额度关键词 → `DSH_UNAVAILABLE`；exit 0 但一个已知事件都没识别到、或识别不到 `turn_end` → `DSH_INCOMPATIBLE` 并输出 `FORMAT: output`；其余 → `FAILED`。
+
+`FORMAT: output` 说明 dsh 的 `--json` 事件格式变了（check 不调模型，发现不了这类变化）。dsh 很可能已经执行了任务，主 Agent 应先核对工作区再补做。修复方法是按新格式更新 `Read-DshEvents`，回归后发新版 kit。OK 但没识别到任何 `step_end` 时，摘要会警告统计可能不准，也是格式变化的信号。
 
 ### setup 的输入校验与写盘
 
@@ -287,6 +295,21 @@ console.log((text.match(/compaction\/start/g) || []).length);
 - 固定档模型升级后不再支持该档时停止，并要求重新 setup 选档。
 - auto 模式重新选择默认档（`high` → `medium` → 支持的最后一档）。
 - 使用当前实际 dsh 安装目录，重新生成补丁、更新 state（写 state 同样加互斥锁），再跑 `check -UpdateBaseline`。
+
+### update 做什么
+
+- 需要 git。从 `kit-meta.json` 的 `updateSource`（可用环境变量 `DSH_KIT_UPDATE_SOURCE` 覆盖，测试时指向本地仓库）浅克隆 `updateBranch` 到 `KIT_HOME\update\<时间戳>`，结束时删除。
+- 从新包 `install.ps1` 读版本号，与当前包版本比较；更新内容取新包本文件第 7 节里比当前版本新的条目。
+- 已安装副本：对 claude、codex 分别按 `Get-KitSkillTarget` 的规则（参数 → `DSH_KIT_CLAUDE_SKILLS_DIR` / `DSH_KIT_CODEX_SKILLS_DIR` → kit 自身目录 → 默认目录）找目录，带有效 `.kit-install.json` 且 host 匹配的才算。
+- 不带 `-Apply` 只报告；带 `-Apply` 时对每个副本运行新包的 `install.ps1 -Target <host> -<Host>SkillsDir <根目录> -Force`，然后用新装的 `kit.ps1` 跑 `check -Json -UpdateBaseline`，不通过再跑 `repair`。没有 state 时跳过自检。
+- 不动 `KIT_HOME` 里的配置和日志；新 SKILL.md 需要宿主开新会话才会加载。
+
+### 发布新版本（维护者）
+
+1. dsh 发布新版后，在本机升级 dsh，按第 6 节回归。
+2. 需要改代码时修改并回归；无论是否改代码，把验证通过的 dsh 版本加入 `kit-meta.json` 的 `testedDshVersions`，必要时更新 `recommendedDshVersion`，同时更新 README 的兼容表。
+3. 改了代码就同时改 `install.ps1` 和 `scripts\lib\common.ps1` 里的 `$script:KitVersion`，在第 7 节加一行变更记录（格式 `- x.y.z（日期）：说明`，update 靠它展示更新内容）。
+4. 推送到 gitee 的 `main` 分支，用户运行 `update` 即可拿到。
 
 ### 功能分级
 
@@ -327,6 +350,7 @@ console.log((text.match(/compaction\/start/g) || []).length);
 2. 运行 `kit.ps1 repair`；需要安装插件时由用户确认后加 `-InstallPlugins`。
 3. 原因是 `FEATURE: browser` 或 `FEATURE: computerUse` 时，任务不依赖该功能就去掉对应参数重派。
 4. 模型档位不再支持时，重新 `setup` 选档。
+5. 带 `FORMAT: output` 时 repair 无效：用户侧运行 `update` 或回退 dsh；维护者侧按「运行后的状态判定」修 `Read-DshEvents`。
 
 ### `FEATURE: browser`
 
@@ -606,3 +630,4 @@ Test-Path (Join-Path $env:DSH_KIT_HOME 'patches')        # True：拒绝清理�
 ## 7. 变更记录
 
 - 0.1.0（2026-10-23）：首个版本。
+- 0.2.0（2026-10-23）：dsh 输出格式无法识别时返回 `DSH_INCOMPATIBLE` + `FORMAT: output`，不再误判为 FAILED；dsh 版本未经验证时在 check、status 和派发摘要里警告并给出回退命令；新增 `update` 子命令，从 gitee 检查并安装新版 kit；README 增加「dsh 升级后失效怎么办」。

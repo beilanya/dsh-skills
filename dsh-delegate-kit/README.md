@@ -12,7 +12,7 @@
 2. **写任务单**：目标、工作目录、可改文件、禁止事项、验收命令、返回格式写成独立完整的文件，大任务拆成互不依赖的子任务并行派发。
 3. **后台执行**：`dsh-run.ps1` 叠加 kit 生成的补丁（凭证、所选模型和思考档、按需挂浏览器或电脑操作），以 `dsh headless --json` 运行，事件流和进度实时落盘；Codex 侧由 `dsh-dispatch.ps1` 在后台运行，完成后用 `codex queue` 回调。
 4. **审核**：主 Agent 读摘要（状态、耗时、token、git 变化、最终回复），核对 diff，亲自复跑关键验收；不合格就用 `-SessionId` 续接修正。
-5. **兼容保护**：每次派发前比对 dsh 版本和补丁哈希，变化时自动自检；不兼容返回 `DSH_INCOMPATIBLE`，主 Agent 自动回退到宿主自带方式，你再运行 `repair` 修复。
+5. **兼容保护**：每次派发前比对 dsh 版本和补丁哈希，变化时自动自检；不兼容返回 `DSH_INCOMPATIBLE`，主 Agent 自动回退到宿主自带方式，你再运行 `repair` 修复。dsh 的输出格式认不出来时同样返回 `DSH_INCOMPATIBLE`（带 `FORMAT: output`），不会把成功的任务误判成失败；当前 dsh 版本没经过本 kit 验证时会给出警告。见「[dsh 升级后失效怎么办](#dsh-升级后失效怎么办)」。
 
 ## 前置条件
 
@@ -123,6 +123,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "<skill目录>\scripts\kit.p
 | `status` | 显示当前模型、思考模式、默认权限和可选功能 | 无 |
 | `stats` | 按 `index.jsonl` 统计效率 | `-Days <天数>`（不能为负数） |
 | `diag` | 生成脱敏诊断包 | 无 |
+| `update` | 检查 gitee 上的新版 kit；`-Apply` 时重装到本机所有已安装的副本并自检 | `-Apply`、`-Force` |
 | `rules` | 展示或追加全局规则段落 | `-Host claude\|codex`、`-Show`、`-Apply`、`-RulesFile <路径>` |
 | `uninstall` | 移除规则段落和 kit 数据 | `-Host claude\|codex\|all`、`-RemoveSkills`、`-PurgeLogs`、`-RulesFile <路径>`、`-ClaudeSkillsDir <目录>`、`-CodexSkillsDir <目录>` |
 
@@ -191,7 +192,34 @@ Windows 上 dsh 的 ACL 沙箱在 `workspace-write` 下只允许写工作区和�
 |---|---|---|
 | `0.2.1-rc.2` | 2026-10-23 | 通过（已测试；具体测试项见 `docs\MAINTENANCE.md` 的回归清单） |
 
+已验证的版本同时写在 `scripts\lib\kit-meta.json` 里。当前 dsh 版本不在列表中时，`check`、`status` 和每次派发的摘要都会给出“未经本 kit 验证”的警告和回退命令；这只是提示，不影响使用。
+
 dsh 升级后，`dsh-run.ps1` 会在派发前做一次轻量预检（版本、补丁哈希、上次 check）；需要时自动运行 `check`。自动 `check` 最多等 120 秒，超时会终止它并返回 `DSH_INCOMPATIBLE`；`base` 补丁缺失或路径为空也按 `DSH_INCOMPATIBLE` 处理，不启动 dsh。不通过时返回 `STATUS: DSH_INCOMPATIBLE`，不会启动 dsh；宿主按 Skill 规则回退到宿主自带方式（Claude Code 用内置子 Agent，Codex 自己做或用 Codex 子代理），并提示你运行 `repair` 修复。某项可选功能不可用时，也会以 `FEATURE: browser` 或 `FEATURE: computerUse` 的形式返回 `DSH_INCOMPATIBLE`，去掉对应参数即可重派。
+
+check 只验证配置、不调用模型，所以 dsh 输出格式的变化要到真正派发时才能发现：dsh 正常退出（exit 0）却识别不到 `turn_end` 等事件时，返回 `DSH_INCOMPATIBLE` 并带 `FORMAT: output`。这时 dsh 很可能已经执行了任务，主 Agent 会先核对工作区再补做剩余部分；这种情况 `repair` 修不了，需要新版 kit。
+
+### dsh 升级后失效怎么办
+
+不需要改任何代码，在对话框里按顺序处理即可：
+
+1. **什么都不做也能用**：派发失败时主 Agent 会自动改用宿主自带方式（Claude Code 用子 Agent，Codex 自己做）完成当前任务，并告诉你原因。
+2. **运行 `repair`**（Claude：`/dsh-delegate-kit repair`，Codex：`$dsh-delegate-kit repair`）：插件 id、补丁格式、思考档写法变化这类配置层问题大多能自动修好。提示插件未对齐时，按主 Agent 的提问同意安装即可。提示模型或思考档不再支持时，重新运行 `setup` 选择。
+3. **运行 `update`**：repair 修不好，或提示 `FORMAT: output` 时，说明需要新版 kit。`update` 会从 gitee 检查新版并列出更新内容，你确认后自动重装到 Claude 和 Codex 两边并自检；完成后开一个新会话即可。
+4. **回退 dsh**：还没有适配的新版 kit 时，把 dsh 装回兼容表里的版本，下次派发会自动自检并恢复：
+
+   ```powershell
+   npm i -g @deepseek-ai/dsh@0.2.1-rc.2
+   ```
+
+   DSH 桌面端用的也是这个 dsh，等 kit 发布新版后再升级回来。
+
+问题仍未解决时，运行 `diag` 生成诊断包（不含任何 Key），到 [gitee 仓库](https://gitee.com/beilanya/dsh-skills/issues) 提 issue 并附上诊断包。
+
+## 更新 kit
+
+- 推荐：在对话框里说 `/dsh-delegate-kit update`（Codex：`$dsh-delegate-kit update`）。需要本机装有 git；只拉取到 `KIT_HOME\update\` 下的临时目录比对，用完即删，确认后才重装。
+- 手动：重新 `git clone`（或在原来的克隆目录里 `git pull`），再在 `dsh-delegate-kit` 目录运行 `install.ps1 -Target both -Force`（只装了一边时换成 `claude` 或 `codex`）。
+- 更新只替换 skill 文件，不动 `KIT_HOME` 里的配置和日志，也不需要重新 setup；更新后会自动跑一次 `check`，不通过时自动 `repair`。
 
 ## 卸载
 
@@ -230,7 +258,7 @@ kit.ps1 uninstall -Host all -RemoveSkills -ClaudeSkillsDir 'D:\skills' -CodexSki
 
 **出现 `DSH_INCOMPATIBLE` 怎么办？**
 
-表示当前 dsh 与 kit 的基线不兼容：dsh 版本变了、补丁缺失或被改坏、模型不再支持所选思考档，或所需可选功能不可用。运行 `repair` 重新生成并自检；如果原因是 `FEATURE: browser` / `FEATURE: computerUse`，也可以去掉对应参数重派。
+表示当前 dsh 与 kit 的基线不兼容：dsh 版本变了、补丁缺失或被改坏、模型不再支持所选思考档，或所需可选功能不可用。运行 `repair` 重新生成并自检；如果原因是 `FEATURE: browser` / `FEATURE: computerUse`，也可以去掉对应参数重派。带 `FORMAT: output` 时 repair 无效，按「[dsh 升级后失效怎么办](#dsh-升级后失效怎么办)」运行 `update` 或回退 dsh。
 
 **浏览器不可用怎么办？**
 
