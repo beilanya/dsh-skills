@@ -1,7 +1,7 @@
 ﻿# dsh-delegate-kit 共用函数（由 kit.ps1 dot-source；dsh-run.ps1 不依赖本文件）。
 # 兼容 Windows PowerShell 5.1。给人看的提示一律走 Write-KitInfo，不要用 Write-Output（会混进返回值）。
 
-$script:KitVersion = '0.4.0'
+$script:KitVersion = '0.4.1'
 $script:KitUtf8 = New-Object System.Text.UTF8Encoding($false)
 $script:KitJsonMode = $false
 $script:KitModes = @('read-only', 'workspace-write', 'danger-full-access')
@@ -38,13 +38,18 @@ function Read-KitText([string]$path) {
   return $text
 }
 function Test-KitUtf8TextFile([string]$path) {
-  # 按字节判断：UTF-8（可带 BOM）返回 Ok=$true；UTF-16 BOM 或非法 UTF-8 返回 Ok=$false
+  # 按字节判断：UTF-8（可带 BOM）返回 Ok=$true；UTF-16 BOM、含 NUL 字节或非法 UTF-8 返回 Ok=$false
   $r = [ordered]@{ Exists = $false; Ok = $true; Bom = $false; Reason = '' }
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $r }
   $r.Exists = $true
   $bytes = [IO.File]::ReadAllBytes($path)
   if ($bytes.Length -ge 2 -and (($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) -or ($bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF))) {
     $r.Ok = $false; $r.Reason = 'UTF-16 BOM'
+    return $r
+  }
+  # 无 BOM 的 UTF-16 里中文常恰好是合法 UTF-8，只能靠 NUL 字节识别；正常文本文件不含 NUL
+  if ([Array]::IndexOf($bytes, [byte]0) -ge 0) {
+    $r.Ok = $false; $r.Reason = '含 NUL 字节（可能是无 BOM 的 UTF-16）'
     return $r
   }
   $offset = 0

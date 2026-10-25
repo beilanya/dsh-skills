@@ -654,3 +654,4 @@ Test-Path (Join-Path $env:DSH_KIT_HOME 'off.json')       # False
 - 0.2.0（2026-10-23）：dsh 输出格式无法识别时返回 `DSH_INCOMPATIBLE` + `FORMAT: output`，不再误判为 FAILED；dsh 版本未经验证时在 check、status 和派发摘要里警告并给出回退命令；新增 `update` 子命令，从 gitee 检查并安装新版 kit；README 增加「dsh 升级后失效怎么办」。
 - 0.3.0（2026-10-23）：改为统一用 `npx skills add beilanya/dsh-skills --skill dsh-delegate-kit -g` 安装，装好后直接 setup；删除 `install.ps1` / `install.cmd` 和安装器 skill；新增通用入口 `SKILL.md`，宿主说明移到 `hosts\`；`update` 改为调用 `npx skills update`；旧方式安装的副本需要按 README 迁移一次。
 - 0.4.0（2026-10-23）：新增 `on` / `off` 子命令与 `off.json`；`off` 移除两个宿主的 kit 规则段落并写 `off.json`，`on` 按当前配置写回规则段落；新增 `DSH_DISABLED` 状态和退出码 6，关闭期间派发脚本拒绝启动 dsh；规则段落声明优先于用户其他委派规则，`off` 后用户原有规则恢复；关闭期间 `rules -Apply` 和 setup 第 7 步拒绝并提示先运行 `on`；`status` 显示委派开关；`uninstall` 清理 `off.json`。
+- 0.4.1（2026-10-25）：验证通过 dsh 0.2.1-rc.3，加入已验证版本，回退建议改为 0.2.1-rc.3；修复无 BOM 的 UTF-16 规则文件被当成 UTF-8 追加而写坏的问题，规则文件含 NUL 字节时拒绝写入；更正文档：回退命令行版 dsh 不影响 DSH 桌面端（桌面端自带独立运行时）。

@@ -80,7 +80,7 @@ Claude 用 `scripts\dsh-run.ps1`，Codex 用 `scripts\dsh-dispatch.ps1`，参数
 
 1. `repair`：配置层的不兼容（插件 id、补丁格式、思考档写法变了）大多能自动修好。
 2. `update`：repair 修不好，或提示 `FORMAT: output` 时，说明需要新版 kit；有新版就按提示更新。
-3. 回退 dsh：暂时没有新版 kit 时，把 dsh 装回已验证的版本（`check` / `status` 会给出命令，例如 `npm i -g @deepseek-ai/dsh@0.2.1-rc.2`），下次派发会自动自检恢复。注意 DSH 桌面端用的也是这个 dsh。
+3. 回退 dsh：暂时没有新版 kit 时，把 dsh 装回已验证的版本（`check` / `status` 会给出命令，例如 `npm i -g @deepseek-ai/dsh@0.2.1-rc.3`），下次派发会自动自检恢复。这只回退命令行版 dsh，DSH 桌面端自带独立的 dsh 运行时，不受影响。
 
 `status` 和每次派发的摘要会提示当前 dsh 版本是否经过本 kit 验证。
 

@@ -194,6 +194,7 @@ Windows 上 dsh 的 ACL 沙箱在 `workspace-write` 下只允许写工作区和�
 | dsh 版本 | 测试日期 | 结果 |
 |---|---|---|
 | `0.2.1-rc.2` | 2026-10-23 | 通过（已测试；具体测试项见 `docs\MAINTENANCE.md` 的回归清单） |
+| `0.2.1-rc.3` | 2026-10-25 | 通过（回归清单 6.1–6.11 全部通过） |
 
 已验证的版本同时写在 `scripts\lib\kit-meta.json` 里。当前 dsh 版本不在列表中时，`check`、`status` 和每次派发的摘要都会给出“未经本 kit 验证”的警告和回退命令；这只是提示，不影响使用。
 
@@ -211,10 +212,10 @@ check 只验证配置、不调用模型，所以 dsh 输出格式的变化要到
 4. **回退 dsh**：还没有适配的新版 kit 时，把 dsh 装回兼容表里的版本，下次派发会自动自检并恢复：
 
    ```powershell
-   npm i -g @deepseek-ai/dsh@0.2.1-rc.2
+   npm i -g @deepseek-ai/dsh@0.2.1-rc.3
    ```
 
-   DSH 桌面端用的也是这个 dsh，等 kit 发布新版后再升级回来。
+   这只回退命令行版 dsh；DSH 桌面端自带独立的 dsh 运行时，不受影响。等 kit 发布新版后再升级回来。
 
 问题仍未解决时，运行 `diag` 生成诊断包（不含任何 Key），到 [gitee 仓库](https://gitee.com/beilanya/dsh-skills/issues) 提 issue 并附上诊断包。
 
