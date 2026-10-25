@@ -417,6 +417,8 @@ console.log((text.match(/compaction\/start/g) || []).length);
 
 以下操作全部在临时 `DSH_KIT_HOME` 和临时规则副本上做；不要用真实 KIT_HOME，也不要把测试产物写进用户项目。
 
+源码仓库根目录的 `dev\regress-dsh-delegate-kit.ps1` 会自动跑完 6.1–6.11 并逐项输出 PASS/FAIL（参数见脚本开头注释）。它只在源码仓库里，`npx skills` 安装的副本不含该文件。下面是各项的手动步骤和判定标准。
+
 准备：
 
 ```powershell
