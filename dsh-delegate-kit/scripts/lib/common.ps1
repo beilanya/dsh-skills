@@ -1,7 +1,7 @@
 ﻿# dsh-delegate-kit 共用函数（由 kit.ps1 dot-source；dsh-run.ps1 不依赖本文件）。
 # 兼容 Windows PowerShell 5.1。给人看的提示一律走 Write-KitInfo，不要用 Write-Output（会混进返回值）。
 
-$script:KitVersion = '0.4.1'
+$script:KitVersion = '0.4.2'
 $script:KitUtf8 = New-Object System.Text.UTF8Encoding($false)
 $script:KitJsonMode = $false
 $script:KitModes = @('read-only', 'workspace-write', 'danger-full-access')
